@@ -65,6 +65,43 @@ for departments above the average cost it answered `('cardiology', 470.25)`
 against `('cardiology',)`. The answers are right; strict result-set comparison
 penalises the extra column. By content the model scored 18/18.
 
+## Resume here
+
+Run 3 was stopped part-way at iteration 125 of 2700. A checkpoint exists at
+iteration 250, so it does not restart from zero.
+
+```bash
+cd training
+# data is already prepared: 5,400 examples = 4,000 natural gretel mix
+# + 1,400 synthetic multi-level aggregation (26%)
+../.venv/bin/python -m mlx_lm lora -c mlx_lora_config.yaml \
+    --resume-adapter-file outputs/qwen3-4b-text2sql-run3/0000250_adapters.safetensors
+```
+
+Then both evaluations, which is the point of the run:
+
+```bash
+# 1. the original held-out 300, byte-identical to run 1 -- checks for regression
+../.venv/bin/python evaluate_mlx.py --adapter outputs/qwen3-4b-text2sql-run3 \
+    --test data/test.jsonl --limit 300 --out outputs/run3-general/eval_report.json --skip-base
+# 2. 150 held-out multi-level examples, zero overlap with training -- measures the fix
+../.venv/bin/python evaluate_mlx.py --adapter outputs/qwen3-4b-text2sql-run3 \
+    --test data/multilevel_test.jsonl --limit 150 --out outputs/run3-multilevel/eval_report.json
+../.venv/bin/python compare_runs.py outputs/run1-natural-mix/eval_report.json \
+    outputs/run3-general/eval_report.json --labels "run1,run3"
+```
+
+Notes for tomorrow:
+
+- Training ran at 0.44 it/s rather than run 1's 0.74, because the local demo
+  backend was holding the 4.3GB GGUF and swap was at 7.4GB. Stop that server
+  first and it should run closer to 0.74, so roughly an hour rather than two.
+- If run 3 does not beat run 1 on the general set, run 1 stays published. Run 2
+  already demonstrated that a plausible data change can fail to help.
+- The demo currently points at the Hugging Face Space. A Cloudflare quick tunnel
+  gets a fresh random hostname on every start, so for a stable local backend use
+  Tailscale Funnel, an ngrok static domain, or a Cloudflare named tunnel.
+
 ## Open
 
 - [ ] Restore a permanent backend. The demo currently runs through a Cloudflare
