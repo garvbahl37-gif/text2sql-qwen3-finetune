@@ -1,8 +1,11 @@
 """QLoRA SFT of Qwen3-4B-Instruct on text-to-SQL, via Unsloth.
 
 Tuned for *minimum GPU-hours*: 4-bit base, LoRA on all projections, loss masked
-to assistant tokens only, one epoch over ~8k verified examples.
-Roughly 40-55 min on a single A40 / L40S / A6000.
+to assistant tokens only, one epoch over verified examples, and a sequence
+length measured from the data rather than left at the usual 2048.
+
+Runs on any CUDA GPU: a rented A40/L40S, or a free Kaggle T4 (fp16 is selected
+automatically there, since Turing has no bf16).
 
     python train.py --data data --out outputs/qwen3-4b-text2sql-lora
 """
@@ -52,7 +55,9 @@ def main() -> None:
     ap.add_argument("--model", default="unsloth/Qwen3-4B-Instruct-2507")
     ap.add_argument("--data", type=Path, default=Path("data"))
     ap.add_argument("--out", type=Path, default=Path("outputs/qwen3-4b-text2sql-lora"))
-    ap.add_argument("--max-seq", type=int, default=2048)
+    # Measured over the prepared data: median 194 tokens, p99 396, longest 581.
+    # The usual 2048 default is ~3x oversized and costs memory for nothing.
+    ap.add_argument("--max-seq", type=int, default=640)
     ap.add_argument("--rank", type=int, default=32)
     ap.add_argument("--batch-size", type=int, default=8)
     ap.add_argument("--grad-accum", type=int, default=2)

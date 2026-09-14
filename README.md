@@ -33,13 +33,14 @@ those, rather than training on broken queries.
 
 ## 1. Train
 
-Two paths. They produce the same thing and share every other script.
+Three paths. They produce the same artifact and share every other script.
 
-| | Apple Silicon (MLX) | RunPod (CUDA + Unsloth) |
-|---|---|---|
-| Cost | **free** | ~$0.35 |
-| Time | ~21 min (measured, M5 Pro) | ~45 min |
-| Needs | M-series Mac, ~10GB free memory | rented A40 / L40S |
+| | Apple Silicon (MLX) | Kaggle (CUDA + Unsloth) | RunPod (CUDA + Unsloth) |
+|---|---|---|---|
+| Cost | **free** | **free** (30 GPU-h/week) | ~$0.35 |
+| Time | ~21 min (measured, M5 Pro) | not measured — watch the first 50 steps | ~45 min |
+| Needs | M-series Mac, ~10GB free memory | Kaggle account, phone-verified | rented A40 / L40S |
+| Ties up your laptop | yes | no | no |
 
 ### Apple Silicon
 
@@ -55,6 +56,24 @@ bash mac_pipeline.sh
 
 That creates the venv, prepares data, trains, evaluates, fuses and publishes.
 Every stage is idempotent, so a re-run skips work that already succeeded.
+
+### Kaggle
+
+Open `training/kaggle_text2sql.ipynb` on Kaggle. Set **Accelerator** to `GPU T4 x2`,
+turn **Internet** on (needs phone verification), and add your Hugging Face write
+token as a Secret named `HF_TOKEN` — the notebook reads it from Kaggle Secrets so
+it never appears in a cell.
+
+The notebook fetches this code either by cloning your GitHub repo (set `REPO_URL`)
+or from the `training/` folder uploaded as a Kaggle Dataset, so the repo can stay
+private.
+
+A Kaggle **API key is not needed for the data** — the dataset comes from Hugging
+Face, not Kaggle. A key only matters if you want to upload the code as a Dataset
+or push the notebook from the CLI (`kaggle kernels push`).
+
+Note that T4 is Turing and has no bf16; `train.py` detects that and selects fp16
+automatically.
 
 ### RunPod
 
