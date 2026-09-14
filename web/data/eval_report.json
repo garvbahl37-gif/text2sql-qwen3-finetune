@@ -1,0 +1,10 @@
+{
+  "placeholder": true,
+  "base_model": "unsloth/Qwen3-4B-Instruct-2507",
+  "tuned_model": "outputs/qwen3-4b-text2sql-lora",
+  "dataset": "gretelai/synthetic_text_to_sql",
+  "n_examples": 0,
+  "decoding": "greedy",
+  "metrics": null,
+  "samples": []
+}

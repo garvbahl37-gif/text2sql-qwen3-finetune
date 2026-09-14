@@ -1,0 +1,5 @@
+# Free CPU-tier fallback. Rename this file over requirements.txt and set
+# USE_GGUF=1 in the Space's variables. Slower (~5-8 tok/s) but no GPU quota.
+llama-cpp-python>=0.3.2
+huggingface_hub>=0.26.0
+gradio>=5.0.0
