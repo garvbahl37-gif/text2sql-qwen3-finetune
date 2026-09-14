@@ -30,6 +30,48 @@ SYSTEM_PROMPT = (
 )
 USER_TEMPLATE = "### Schema\n{schema}\n\n### Question\n{question}"
 
+# Shown to the model when its first query fails to run. Feeding the database's
+# own error back is far more effective than asking for "valid SQL" up front:
+# the model cannot know it misused a window function until SQLite says so.
+REPAIR_TEMPLATE = """### Schema
+{schema}
+
+### Question
+{question}
+
+### Your previous answer
+{sql}
+
+### It failed with this SQLite error
+{error}
+
+Rewrite the query so it runs. Use only tables and columns that appear in the
+schema above.{hint}
+
+Output only the corrected SQL, and make it different from the previous answer."""
+
+# SQLite-specific guidance for the error classes this model actually hits.
+# General SQL advice, not a patch for one query: window functions cannot appear
+# in WHERE or HAVING, and aliases are not visible there either.
+REPAIR_HINTS = (
+    ("window function", "\nSQLite does not allow window functions in WHERE or HAVING. "
+                        "Compute the window expression in a subquery or CTE, then filter "
+                        "the outer query on its result."),
+    ("no such column", "\nOne of the columns does not exist. Re-read the CREATE TABLE "
+                       "statements and use only the column names written there."),
+    ("no such table", "\nOne of the tables does not exist. Use only the tables in the "
+                      "schema above."),
+    ("ambiguous column", "\nQualify every column with its table alias."),
+)
+
+
+def repair_hint(error: str) -> str:
+    low = (error or "").lower()
+    for needle, hint in REPAIR_HINTS:
+        if needle in low:
+            return hint
+    return ""
+
 # ZeroGPU decorator when running on a Space that has it; a no-op otherwise so
 # the same file runs on a plain GPU box or locally.
 try:
@@ -56,11 +98,11 @@ if USE_GGUF:
         verbose=False,
     )
 
-    def _complete(schema: str, question: str, max_new_tokens: int, temperature: float) -> str:
+    def _complete_raw(user_content: str, max_new_tokens: int, temperature: float) -> str:
         out = _llm.create_chat_completion(
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": USER_TEMPLATE.format(schema=schema, question=question)},
+                {"role": "user", "content": user_content},
             ],
             max_tokens=max_new_tokens,
             temperature=temperature,
@@ -84,10 +126,10 @@ else:
     _model.eval()
 
     @gpu_task
-    def _complete(schema: str, question: str, max_new_tokens: int, temperature: float) -> str:
+    def _complete_raw(user_content: str, max_new_tokens: int, temperature: float) -> str:
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": USER_TEMPLATE.format(schema=schema, question=question)},
+            {"role": "user", "content": user_content},
         ]
         text = _tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
         enc = _tokenizer(text, return_tensors="pt").to(_model.device)
@@ -101,6 +143,13 @@ else:
                 pad_token_id=_tokenizer.pad_token_id or _tokenizer.eos_token_id,
             )
         return _tokenizer.decode(gen[0][enc["input_ids"].shape[1] :], skip_special_tokens=True)
+
+
+def _complete(schema: str, question: str, max_new_tokens: int, temperature: float) -> str:
+    """The normal first-attempt prompt."""
+    return _complete_raw(
+        USER_TEMPLATE.format(schema=schema, question=question), max_new_tokens, temperature
+    )
 
 
 # --------------------------------------------------------------------------
@@ -162,7 +211,8 @@ def execute(schema: str, sql: str) -> tuple[list[str], list[list], str | None]:
         con.close()
 
 
-def generate(schema: str, question: str, max_new_tokens: int = MAX_NEW_TOKENS, temperature: float = 0.0):
+def generate(schema: str, question: str, max_new_tokens: int = MAX_NEW_TOKENS,
+             temperature: float = 0.0, repair: bool = True):
     """Main entrypoint. Exposed to the frontend as api_name='generate'."""
     schema, question = (schema or "").strip(), (question or "").strip()
     if not schema or not question:
@@ -170,13 +220,44 @@ def generate(schema: str, question: str, max_new_tokens: int = MAX_NEW_TOKENS, t
 
     t0 = time.time()
     raw = _complete(schema, question, int(max_new_tokens), float(temperature))
-    gen_ms = int((time.time() - t0) * 1000)
 
     sql = extract_sql(raw)
     if not sql and DESTRUCTIVE.search(raw):
         sql, cols, rows, err = raw.strip(), [], [], "only read queries are executed in this demo"
     else:
         cols, rows, err = execute(schema, sql)
+
+    # One repair attempt. The model writes elaborate queries for hard questions
+    # and sometimes trips over a dialect rule -- SQLite rejects window functions
+    # in HAVING, for instance. Handing back the error lets it correct itself.
+    first_sql, first_error, repaired = sql, err, False
+    repair_attempted, repair_sql, repair_error = False, None, None
+    if repair and err and not err.startswith("only read"):
+        repair_attempted = True
+        prompt = REPAIR_TEMPLATE.format(schema=schema, question=question, sql=sql,
+                                        error=err, hint=repair_hint(err))
+        # Greedy decoding reproduces the same wrong query no matter what the
+        # prompt says, so repairs sample instead. Two tries with rising
+        # temperature: the first stays close to the original, the second is
+        # free to restructure.
+        for attempt, temp in enumerate((0.5, 0.9), start=1):
+            raw2 = _complete_raw(prompt, int(max_new_tokens), temp)
+            sql2 = extract_sql(raw2)
+            repair_sql = sql2 or repair_sql
+            if not sql2:
+                repair_error = "the repair attempt produced no SQL"
+                continue
+            if sql2 == sql:
+                repair_error = "the model returned the same query unchanged"
+                continue
+            cols2, rows2, err2 = execute(schema, sql2)
+            if err2 is None:
+                sql, cols, rows, err, repaired = sql2, cols2, rows2, None, True
+                repair_error = None
+                break
+            repair_error = err2
+
+    gen_ms = int((time.time() - t0) * 1000)
 
     if err:
         table_md = f"_{err}_"
@@ -194,6 +275,14 @@ def generate(schema: str, question: str, max_new_tokens: int = MAX_NEW_TOKENS, t
         "generation_ms": gen_ms,
         "executed": err is None,
         "error": err,
+        "repaired": repaired,
+        "repair_attempted": repair_attempted,
+        # Kept even when the repair fails -- "attempted and still wrong" and
+        # "never attempted" are different bugs and must not look identical.
+        "repair_sql": repair_sql,
+        "repair_error": repair_error,
+        "first_attempt_sql": first_sql if repair_attempted else None,
+        "first_attempt_error": first_error if repair_attempted else None,
         "columns": cols,
         "rows": rows[:200],
         "row_count": len(rows),

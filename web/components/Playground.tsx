@@ -197,6 +197,27 @@ export default function Playground() {
 
         {status === "error" && <p className="notice bad">{error}</p>}
 
+        {status === "done" && meta?.repaired && (
+          <details className="notice">
+            <summary style={{ cursor: "pointer" }}>
+              First query failed and the model corrected it
+            </summary>
+            <p style={{ margin: "8px 0 4px" }}>{meta.first_attempt_error}</p>
+            <pre
+              className="mono"
+              style={{
+                margin: 0,
+                fontSize: 12,
+                whiteSpace: "pre-wrap",
+                wordBreak: "break-word",
+                color: "var(--muted)",
+              }}
+            >
+              {meta.first_attempt_sql}
+            </pre>
+          </details>
+        )}
+
         {status === "done" && meta && !meta.executed && (
           <p className="notice bad">{meta.error ?? "The query did not run."}</p>
         )}

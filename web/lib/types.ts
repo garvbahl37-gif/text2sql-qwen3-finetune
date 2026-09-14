@@ -48,5 +48,8 @@ export type GenerateResponse = {
     columns?: string[];
     rows?: (string | number | boolean | null)[][];
     row_count?: number;
+    repaired?: boolean;
+    first_attempt_sql?: string | null;
+    first_attempt_error?: string | null;
   };
 };
