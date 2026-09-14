@@ -1,0 +1,7 @@
+# Default: ZeroGPU / CUDA inference on the merged 16-bit weights.
+torch
+transformers>=4.51.0
+accelerate>=1.0.0
+sentencepiece
+gradio>=5.0.0
+spaces

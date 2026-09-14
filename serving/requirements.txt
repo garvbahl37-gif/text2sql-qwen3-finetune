@@ -1,7 +1,5 @@
-# Default: ZeroGPU / CUDA inference on the merged 16-bit weights.
-torch
-transformers>=4.51.0
-accelerate>=1.0.0
-sentencepiece
+# Free CPU-tier fallback. Rename this file over requirements.txt and set
+# USE_GGUF=1 in the Space's variables. Slower (~5-8 tok/s) but no GPU quota.
+llama-cpp-python>=0.3.2
+huggingface_hub>=0.26.0
 gradio>=5.0.0
-spaces
