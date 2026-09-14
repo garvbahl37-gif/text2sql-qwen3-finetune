@@ -45,6 +45,17 @@ def main() -> None:
         print("  WARNING: fusing into a 4-bit base bakes quantisation error into the\n"
               "           published weights. Pass the full-precision repo instead.")
 
+    # mlx_lm.load() fetches only model files, but mlx_lm's save() then calls
+    # snapshot_download(local_files_only=True), which demands a COMPLETE
+    # snapshot -- including .gitattributes, LICENSE and README.md. Without
+    # them the fuse dies at the very last step with IncompleteSnapshotError.
+    # Pre-fetch the whole repo (the missing files are a few KB).
+    if "/" in args.base and not Path(args.base).exists():
+        from huggingface_hub import snapshot_download
+
+        print("Completing the base model snapshot ...")
+        snapshot_download(args.base)
+
     cmd = [sys.executable, "-m", "mlx_lm", "fuse",
            "--model", args.base,
            "--adapter-path", str(args.adapter),

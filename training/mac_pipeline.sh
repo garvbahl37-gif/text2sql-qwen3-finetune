@@ -57,7 +57,7 @@ if [ ! -f "$ADAPTER/adapters.safetensors" ]; then
     echo "  horizon should be iters/grad_accumulation_steps = $EXPECT_DECAY, not $DECAY." >&2
     exit 1
   fi
-  log "Training the LoRA adapter ($ROWS examples, $ITERS iters, ~21 min on an M5 Pro)"
+  log "Training the LoRA adapter ($ROWS examples, $ITERS iters, ~45 min on an M5 Pro)"
   log "Close memory-hungry apps first -- this needs most of the GPU's memory budget."
   $PY -m mlx_lm lora -c mlx_lora_config.yaml
 else

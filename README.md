@@ -38,7 +38,7 @@ Three paths. They produce the same artifact and share every other script.
 | | Apple Silicon (MLX) | Kaggle (CUDA + Unsloth) | RunPod (CUDA + Unsloth) |
 |---|---|---|---|
 | Cost | **free** | **free** (30 GPU-h/week) | ~$0.35 |
-| Time | ~21 min (measured, M5 Pro) | not measured — watch the first 50 steps | ~45 min |
+| Time | **~45 min** (measured, M5 Pro) | not measured — watch the first 50 steps | ~45 min |
 | Needs | M-series Mac, ~10GB free memory | Kaggle account, phone-verified | rented A40 / L40S |
 | Ties up your laptop | yes | no | no |
 
@@ -100,6 +100,12 @@ Every number in `mlx_lora_config.yaml` was measured on the target machine
 | batch 4, checkpointing on | 1.4 ex/s | 6.0 GB | 3x slower for memory we have |
 | batch 4, checkpointing off | 1.9 ex/s | 17.7 GB | swaps, so it loses to batch 2 |
 | **batch 2, checkpointing off** | **3.2 ex/s** | **9.1 GB** | chosen |
+
+The sweep used `val_batches: 1` to stay fast, so it measured raw step speed but
+not the periodic validation the real config pays, and a 40-iteration burst does
+not capture thermal throttling. The **full run sustained 0.74 it/s and took 45
+minutes**, not the 21 the sweep implied. The sweep's relative ranking held —
+batch 2 really does beat batch 4 — which is what it was for.
 
 Three things that are easy to get wrong here:
 
