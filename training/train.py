@@ -87,7 +87,7 @@ def main() -> None:
 
     ds = load_dataset(
         "json",
-        data_files={"train": str(args.data / "train.jsonl"), "val": str(args.data / "val.jsonl")},
+        data_files={"train": str(args.data / "train.jsonl"), "val": str(args.data / "valid.jsonl")},
     )
 
     def render(batch):

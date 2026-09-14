@@ -47,8 +47,11 @@ export default function Page() {
             <h1>Ask in English. Get SQL that runs.</h1>
             <div>
             <p>
-              A 4-billion-parameter Qwen3 model, fine-tuned on 8,000 verified queries to turn a
-              question and a schema into SQLite that executes.
+              A 4-billion-parameter Qwen3 model, fine-tuned on{" "}
+              {evalReport.train_examples
+                ? `${evalReport.train_examples.toLocaleString()} verified queries`
+                : "verified queries"}{" "}
+              to turn a question and a schema into SQLite that executes.
             </p>
             <p>
               {measured && evalReport.metrics ? (

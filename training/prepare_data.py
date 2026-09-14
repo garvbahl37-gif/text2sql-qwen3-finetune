@@ -1,5 +1,8 @@
 """Turn gretelai/synthetic_text_to_sql into chat-formatted JSONL for SFT.
 
+Writes train.jsonl / valid.jsonl / test.jsonl into one directory, which is the
+layout MLX's data loader requires. The CUDA path reads the same files.
+
 Every kept example is verified to actually run against a real in-memory SQLite
 DB built from its own schema. That guarantees execution accuracy is measurable
 on the held-out split instead of being an approximation.
@@ -105,7 +108,7 @@ def main() -> None:
     test = collect(ds["test"], args.test_size, args.seed + 1, skip_ids={r["id"] for r in train + val})
 
     write(args.out / "train.jsonl", train)
-    write(args.out / "val.jsonl", val)
+    write(args.out / "valid.jsonl", val)
     write(args.out / "test.jsonl", test)
 
     dist = Counter(r["complexity"] for r in train)

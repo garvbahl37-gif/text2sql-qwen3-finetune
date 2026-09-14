@@ -1,11 +1,8 @@
-"""Score base Qwen3-4B against the fine-tuned adapter on the held-out test set.
+"""Score base Qwen3-4B against the fine-tuned adapter on a CUDA GPU (Unsloth).
 
-Primary metric is *execution accuracy*: build the real SQLite DB from each
-example's schema, run both the gold and the predicted query, compare result
-sets. String similarity is reported too, but never used as the headline number
-(many correct queries are written differently from the gold).
-
-Writes eval_report.json, which the web frontend renders as its Benchmark tab.
+Scoring lives in evalcore.py and is shared with the Apple Silicon path, so both
+backends report identical numbers. Writes the eval_report.json the frontend
+renders as its Benchmark tab.
 
     python evaluate.py --adapter outputs/qwen3-4b-text2sql-lora --limit 300
 """
@@ -16,66 +13,12 @@ from unsloth import FastLanguageModel  # noqa: I001  (must precede transformers)
 import argparse
 import gc
 import json
-import re
-from collections import defaultdict
 from pathlib import Path
 
 import torch
 
-from sqlutil import build_db, gold_is_runnable, normalize_sql, results_match, run_sql
-
-FENCE = re.compile(r"```(?:sql)?\s*(.*?)```", re.DOTALL | re.IGNORECASE)
-SQL_KEYWORD = r"(?:WITH|SELECT|INSERT|UPDATE|DELETE)"
-LINE_START = re.compile(rf"^\s*{SQL_KEYWORD}\b", re.IGNORECASE | re.MULTILINE)
-ANYWHERE = re.compile(rf"\b{SQL_KEYWORD}\b", re.IGNORECASE)
-
-
-def extract_sql(text: str) -> str:
-    """Pull a query out of a raw completion.
-
-    Deliberately generous: the base model wraps SQL in markdown and prose, and
-    penalising it for formatting instead of correctness would inflate the
-    fine-tuned model's apparent win. Returns "" when there is no query at all
-    (e.g. the model refused), so it scores as invalid rather than as garbage.
-    """
-    if m := FENCE.search(text):
-        text = m.group(1)
-
-    # Prefer a keyword that begins a line — that's where real SQL lives.
-    if m := LINE_START.search(text):
-        text = text[m.start() :]
-    else:
-        # Otherwise take the *last* keyword: models put prose first, SQL last,
-        # so this avoids latching onto an English "select" in the preamble.
-        matches = list(ANYWHERE.finditer(text))
-        if not matches:
-            return ""
-        text = text[matches[-1].start() :]
-
-    return text.split(";")[0].strip()
-
-
-def score_one(context: str, gold_sql: str, pred_sql: str) -> tuple[bool, bool]:
-    """Return (executes_cleanly, result_set_matches_gold)."""
-    if not pred_sql:
-        return False, False
-    try:
-        con = build_db(context)
-    except Exception:
-        return False, False
-    try:
-        pred_rows = run_sql(con, pred_sql)
-    except Exception:
-        con.close()
-        return False, False
-    try:
-        gold_rows = run_sql(con, gold_sql)
-    except Exception:
-        con.close()
-        return True, False
-    ok = results_match(gold_rows, pred_rows, gold_sql)
-    con.close()
-    return True, ok
+from evalcore import build_report, print_table
+from sqlutil import gold_is_runnable
 
 
 @torch.inference_mode()
@@ -117,15 +60,6 @@ def run_model(tag: str, model_path: str, conversations, max_seq: int, batch_size
     return preds
 
 
-def summarise(rows: list[dict], key: str) -> dict:
-    n = len(rows)
-    return {
-        "execution_accuracy": round(sum(r[f"{key}_exec_ok"] for r in rows) / n, 4),
-        "valid_sql_rate": round(sum(r[f"{key}_runs"] for r in rows) / n, 4),
-        "exact_match": round(sum(r[f"{key}_exact"] for r in rows) / n, 4),
-    }
-
-
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--base", default="unsloth/Qwen3-4B-Instruct-2507")
@@ -134,106 +68,47 @@ def main() -> None:
     ap.add_argument("--out", type=Path, default=Path("outputs/eval_report.json"))
     ap.add_argument("--limit", type=int, default=300)
     ap.add_argument("--batch-size", type=int, default=16)
-    ap.add_argument("--max-new", type=int, default=256)
+    ap.add_argument("--max-new", type=int, default=192)
     ap.add_argument("--max-seq", type=int, default=3072)
-    ap.add_argument("--skip-base", action="store_true", help="reuse a previous base run to save GPU time")
+    ap.add_argument("--skip-base", action="store_true", help="reuse cached base predictions")
     args = ap.parse_args()
 
     examples = [json.loads(l) for l in args.test.read_text().splitlines() if l.strip()][: args.limit]
-    # Only score examples whose gold query runs, so a broken reference can't
-    # be counted against either model.
+    # Only score examples whose reference query runs, so a broken gold answer
+    # can't be counted against either model.
     examples = [e for e in examples if gold_is_runnable(e["sql_context"], e["gold_sql"])]
     print(f"Scoring {len(examples)} examples with executable gold SQL")
 
-    conversations = [e["messages"][:-1] for e in examples]  # drop the gold assistant turn
+    conversations = [e["messages"][:-1] for e in examples]
 
+    # Record how much data the adapter actually saw, so the site can state it
+    # rather than hardcoding a number that drifts when TRAIN_SIZE changes.
+    train_file = args.test.parent / "train.jsonl"
+    train_examples = sum(1 for _ in train_file.open()) if train_file.exists() else None
+
+    args.out.parent.mkdir(parents=True, exist_ok=True)
     base_cache = args.out.parent / "base_preds.json"
     if args.skip_base and base_cache.exists():
         base_raw = json.loads(base_cache.read_text())
         print(f"Reusing cached base predictions ({len(base_raw)})")
     else:
         base_raw = run_model("BASE", args.base, conversations, args.max_seq, args.batch_size, args.max_new)
-        base_cache.parent.mkdir(parents=True, exist_ok=True)
         base_cache.write_text(json.dumps(base_raw))
 
-    tuned_raw = run_model("FINE-TUNED", str(args.adapter), conversations, args.max_seq, args.batch_size, args.max_new)
+    tuned_raw = run_model(
+        "FINE-TUNED", str(args.adapter), conversations, args.max_seq, args.batch_size, args.max_new
+    )
 
     print("\nExecuting predictions against real SQLite databases ...")
-    rows = []
-    for ex, b_raw, t_raw in zip(examples, base_raw, tuned_raw):
-        b_sql, t_sql = extract_sql(b_raw), extract_sql(t_raw)
-        b_runs, b_ok = score_one(ex["sql_context"], ex["gold_sql"], b_sql)
-        t_runs, t_ok = score_one(ex["sql_context"], ex["gold_sql"], t_sql)
-        gold_norm = normalize_sql(ex["gold_sql"])
-        rows.append({
-            "id": ex.get("id"),
-            "domain": ex.get("domain", ""),
-            "complexity": ex.get("complexity", ""),
-            "question": ex["sql_prompt"],
-            "schema": ex["sql_context"],
-            "gold_sql": ex["gold_sql"],
-            "base_sql": b_sql,
-            "base_raw_len": len(b_raw),
-            "base_runs": b_runs,
-            "base_exec_ok": b_ok,
-            "base_exact": normalize_sql(b_sql) == gold_norm,
-            "tuned_sql": t_sql,
-            "tuned_raw_len": len(t_raw),
-            "tuned_runs": t_runs,
-            "tuned_exec_ok": t_ok,
-            "tuned_exact": normalize_sql(t_sql) == gold_norm,
-        })
+    report, rows = build_report(
+        examples, base_raw, tuned_raw,
+        base_model=args.base, tuned_model=str(args.adapter),
+        backend="cuda-unsloth", train_examples=train_examples,
+    )
 
-    metrics = {"base": summarise(rows, "base"), "tuned": summarise(rows, "tuned")}
-
-    by_complexity: dict[str, dict] = {}
-    buckets = defaultdict(list)
-    for r in rows:
-        buckets[r["complexity"] or "unknown"].append(r)
-    for name, bucket in sorted(buckets.items(), key=lambda kv: -len(kv[1])):
-        by_complexity[name] = {
-            "n": len(bucket),
-            "base": round(sum(r["base_exec_ok"] for r in bucket) / len(bucket), 4),
-            "tuned": round(sum(r["tuned_exec_ok"] for r in bucket) / len(bucket), 4),
-        }
-
-    # Curate showcase samples: mostly wins, but keep honest failures in.
-    wins = [r for r in rows if r["tuned_exec_ok"] and not r["base_exec_ok"]]
-    both = [r for r in rows if r["tuned_exec_ok"] and r["base_exec_ok"]]
-    losses = [r for r in rows if not r["tuned_exec_ok"] and r["base_exec_ok"]]
-    neither = [r for r in rows if not r["tuned_exec_ok"] and not r["base_exec_ok"]]
-    samples = wins[:14] + both[:4] + losses[:3] + neither[:3]
-
-    report = {
-        "base_model": args.base,
-        "tuned_model": str(args.adapter),
-        "dataset": "gretelai/synthetic_text_to_sql",
-        "n_examples": len(rows),
-        "decoding": "greedy",
-        "metrics": metrics,
-        "deltas": {
-            k: round(metrics["tuned"][k] - metrics["base"][k], 4) for k in metrics["base"]
-        },
-        "by_complexity": by_complexity,
-        "counts": {
-            "tuned_win": len(wins), "both_correct": len(both),
-            "tuned_regression": len(losses), "both_wrong": len(neither),
-        },
-        "samples": samples,
-    }
-
-    args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(report, indent=2))
     (args.out.parent / "eval_rows.json").write_text(json.dumps(rows, indent=2))
-
-    print("\n" + "=" * 62)
-    print(f"{'metric':<22}{'base':>12}{'fine-tuned':>14}{'delta':>12}")
-    print("-" * 62)
-    for k in metrics["base"]:
-        b, t = metrics["base"][k], metrics["tuned"][k]
-        print(f"{k:<22}{b:>11.1%}{t:>13.1%}{t - b:>+11.1%}")
-    print("=" * 62)
-    print(f"wins {len(wins)}  |  both right {len(both)}  |  regressions {len(losses)}  |  both wrong {len(neither)}")
+    print_table(report["metrics"], report["counts"])
     print(f"\nReport -> {args.out}")
 
 

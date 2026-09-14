@@ -1,11 +1,11 @@
 # Fine-tuning Qwen3-4B for text-to-SQL
 
-A complete, reproducible fine-tuning project: data preparation, QLoRA training,
+A complete, reproducible fine-tuning project: data preparation, LoRA training,
 an honest base-vs-tuned benchmark, a free inference backend, and a frontend that
 runs the generated SQL against a real database.
 
 ```
-training/   data prep, QLoRA training, evaluation, merge + publish
+training/   data prep, training (Apple Silicon + CUDA), evaluation, publish
 serving/    Hugging Face Space that serves the model (free)
 web/        Next.js frontend for Vercel (free)
 ```
@@ -22,85 +22,106 @@ punished for a broken gold answer.
 Both models get the identical prompt and greedy decoding, and the SQL extractor
 is deliberately lenient about markdown fences and preamble — the base model
 wraps answers in prose, and penalising formatting instead of correctness would
-inflate the result.
+inflate the result. Scoring lives in one module (`evalcore.py`) shared by both
+training backends, so they cannot drift into reporting different numbers.
 
-## Cost
-
-| Stage | Where | Cost |
-|---|---|---|
-| Training (~45 min on one 48GB GPU) | RunPod A40 / L40S | ~$0.35 |
-| Weights hosting | Hugging Face Hub | free |
-| Inference | Hugging Face Space (ZeroGPU, or CPU + GGUF) | free |
-| Frontend | Vercel | free |
-
-To make it **entirely free**, train on Kaggle instead (30 GPU-hours/week on
-T4×2). Same scripts; expect roughly 3 hours rather than 45 minutes.
+Worth knowing: **21% of the raw dataset has gold SQL that does not execute.**
+`prepare_data.py` builds a real database from every example's schema and drops
+those, rather than training on broken queries.
 
 ---
 
 ## 1. Train
 
-Rent one A40 / L40S / A6000 on RunPod with the PyTorch 2.4+ template, 60GB
-container disk. Then:
+Two paths. They produce the same thing and share every other script.
+
+| | Apple Silicon (MLX) | RunPod (CUDA + Unsloth) |
+|---|---|---|
+| Cost | **free** | ~$0.35 |
+| Time | ~21 min (measured, M5 Pro) | ~45 min |
+| Needs | M-series Mac, ~10GB free memory | rented A40 / L40S |
+
+### Apple Silicon
+
+Unsloth cannot be used here — it requires CUDA (Triton kernels, bitsandbytes
+4-bit), neither of which runs on Metal. MLX is Apple's equivalent and is what
+`mlx_lora_config.yaml` targets.
 
 ```bash
-git clone <this repo> && cd FIneTuning/training
-
-export HF_TOKEN=hf_...                        # write scope
-export HF_REPO=<your-hf-username>/qwen3-4b-text2sql
-
-bash runpod_bootstrap.sh
+cd training
+set -a && . ../.env && set +a     # loads HF_TOKEN and HF_REPO
+bash mac_pipeline.sh
 ```
 
-That installs dependencies, prepares data, trains, evaluates, merges, and
-publishes. Every stage is idempotent, so a re-run skips work that already
-succeeded. Or run the steps yourself:
+That creates the venv, prepares data, trains, evaluates, fuses and publishes.
+Every stage is idempotent, so a re-run skips work that already succeeded.
+
+### RunPod
+
+Rent one A40 / L40S / A6000 with the PyTorch 2.4+ template, 60GB container disk.
 
 ```bash
-python prepare_data.py --train-size 8000 --test-size 300
-python train.py --data data --out outputs/qwen3-4b-text2sql-lora
-python evaluate.py --adapter outputs/qwen3-4b-text2sql-lora --limit 300
-python merge_and_push.py --adapter outputs/qwen3-4b-text2sql-lora --repo $HF_REPO --gguf
+cd training
+export HF_TOKEN=hf_...
+export HF_REPO=bharatverse11/qwen3-4b-text2sql
+bash runpod_bootstrap.sh
 ```
 
 **Terminate the pod when it finishes.** RunPod bills per second for as long as
 the pod exists, whether or not anything is running on it.
 
-### Why it trains this fast
+## Why the Apple Silicon config looks the way it does
 
-- 4-bit base weights with LoRA adapters, so only ~1% of parameters get gradients
-- Unsloth's fused kernels, roughly 2× faster than stock PEFT at lower VRAM
-- Loss masked to the assistant turn, so the model is graded on the SQL it writes
-  rather than on re-predicting the schema it was handed
-- 8,000 examples, one epoch — a narrow task does not need more
+Every number in `mlx_lora_config.yaml` was measured on the target machine
+(M5 Pro, 24GB unified, 16-core GPU), not guessed.
+
+| Config | Throughput | Peak memory | |
+|---|---|---|---|
+| batch 8, no checkpointing | — | OOM | |
+| batch 4, checkpointing on | 1.4 ex/s | 6.0 GB | 3x slower for memory we have |
+| batch 4, checkpointing off | 1.9 ex/s | 17.7 GB | swaps, so it loses to batch 2 |
+| **batch 2, checkpointing off** | **3.2 ex/s** | **9.1 GB** | chosen |
+
+Three things that are easy to get wrong here:
+
+- **Sequence length.** The prepared data has a median of 194 tokens and a
+  longest example of 581. The usual 2048 default is ~3x oversized; 640 fits
+  every example whole and is most of the speedup.
+- **What an iteration is.** In MLX one iter consumes one *batch*, and
+  `grad_accumulation_steps` only changes how often the optimizer updates. So
+  one epoch is `examples / batch_size` iters.
+- **The LR schedule horizon.** It advances once per optimizer *update*, not per
+  iteration, so its decay window is `iters / grad_accumulation_steps` — 250,
+  not 2000. Set it to 2000 and the learning rate barely decays at all.
+
+`mac_pipeline.sh` checks all three against each other and refuses to start if
+they disagree, rather than letting you discover it an hour later.
 
 ### Knobs worth turning
 
 | Want | Change |
 |---|---|
-| Better numbers | `--train-size 20000 --epochs 2` (~2.5h) |
-| Cheaper / faster | `--train-size 4000 --rank 16` (~20 min) |
-| Bigger model | `--model unsloth/Qwen3-8B --batch-size 4 --grad-accum 4` |
-| Out of memory | halve `--batch-size`, double `--grad-accum` |
+| Better numbers | `TRAIN_SIZE=8000` (~42 min), then set `iters: 4000` and decay `500` |
+| Faster first run | `TRAIN_SIZE=2000`, `iters: 1000`, decay `125` (~11 min) |
+| Out of memory | drop `batch_size` to 1 and double `grad_accumulation_steps` |
+| Other apps open | set `grad_checkpoint: true` — slower, but peaks at ~6GB |
 
 ## 2. Publish the eval report
 
-Copy `training/outputs/eval_report.json` to `web/data/eval_report.json`. Until
-you do, the Benchmark tab says the numbers have not been measured — nothing on
-the site is simulated.
+```bash
+cp training/outputs/eval_report.json web/data/eval_report.json
+```
+
+Until you do, the Benchmark tab says the numbers have not been measured —
+nothing on the site is simulated.
 
 ## 3. Serve the model (free)
 
 Create a Hugging Face Space, SDK **Gradio**, and upload the contents of
-`serving/`. Set the Space variable `MODEL_ID` to your merged repo.
+`serving/`. Set the Space variable `MODEL_ID=bharatverse11/qwen3-4b-text2sql`.
 
-**ZeroGPU** (default, fast): set Hardware to *ZeroGPU*. Free H200 slices,
-subject to a per-account quota.
-
-**Free CPU tier** (slow, unlimited): set Hardware to *CPU basic*, replace
-`requirements.txt` with `requirements-cpu.txt`, and set `USE_GGUF=1`. Needs the
-GGUF export from `merge_and_push.py --gguf`. About 5-8 tokens/sec, so a query
-takes 6-10 seconds.
+Hardware *ZeroGPU* for free H200 slices (fast, quota-limited), or *CPU basic*
+with `USE_GGUF=1` for slow but unlimited inference. See `serving/README.md`.
 
 ## 4. Deploy the frontend (free)
 
@@ -112,13 +133,13 @@ vercel --prod
 Set one environment variable in the Vercel project:
 
 ```
-HF_SPACE_URL=https://<your-username>-<space-name>.hf.space
+HF_SPACE_URL=https://bharatverse11-<space-name>.hf.space
 ```
 
 The browser never talks to Hugging Face directly — requests go through
 `app/api/generate/route.ts`, so no token is exposed client-side.
 
-To work on the UI locally without a GPU:
+To work on the UI locally without running the model:
 
 ```bash
 cd web && cp .env.example .env.local   # set MOCK_BACKEND=1
@@ -140,8 +161,10 @@ the single accent stays available for interface signals.
 
 ## Security
 
-- `.env` is gitignored. The key pasted during setup is stored there unlabelled
-  and **should be rotated** — it was exposed in chat.
+- `.env` is gitignored and holds the HF token. **Rotate that token** — it was
+  pasted into a chat session.
+- The `KGAT_…` key is stored unlabelled in `.env`; it matches neither RunPod's
+  `rpa_` nor Hugging Face's `hf_` format. Identify it or delete it.
 - The Space executes only read queries, against a throwaway in-memory database,
   and `DROP` / `ALTER` / `PRAGMA` / `ATTACH` are refused outright.
 - The Vercel route validates and length-caps input before forwarding it.

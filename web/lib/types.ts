@@ -22,6 +22,8 @@ export type EvalReport = {
   dataset: string;
   n_examples: number;
   decoding: string;
+  backend?: string;
+  train_examples?: number | null;
   metrics: { base: Metrics; tuned: Metrics } | null;
   deltas?: Partial<Metrics>;
   by_complexity?: Record<string, { n: number; base: number; tuned: number }>;

@@ -1,0 +1,63 @@
+# LoRA fine-tune of Qwen3-4B for text-to-SQL on Apple Silicon (MLX).
+#
+#   mlx_lm.lora -c mlx_lora_config.yaml
+#
+# Every number below was measured on an M5 Pro (24GB unified, 16-core GPU),
+# not guessed. See README "Training on Apple Silicon" for the benchmark table.
+#
+# Trains against a 4-bit base so the run fits in unified memory. The adapter is
+# later fused into the FULL-PRECISION base (fuse_and_push_mlx.py), which keeps
+# quantisation error out of the published weights -- standard QLoRA practice.
+
+model: "mlx-community/Qwen3-4B-Instruct-2507-4bit"
+train: true
+data: "data"
+
+fine_tune_type: lora
+optimizer: adamw
+num_layers: -1              # all 36 blocks, not just the last 16
+
+# Measured over the prepared data: median 194 tokens, p99 396, longest 581.
+# 640 fits every example whole. Batches pad to their own longest row.
+max_seq_length: 640
+
+# batch_size 2 beats 4 on this machine: 3.2 vs 1.9 examples/sec, because
+# batch 4 peaks at 17.7GB and starts swapping. Gradient checkpointing is off
+# because at this batch size it costs ~3x throughput to save memory we have.
+batch_size: 2
+grad_checkpoint: false
+grad_accumulation_steps: 8  # effective batch 16, same as the CUDA recipe
+
+# One epoch over 4000 examples: one iter consumes one batch, so 4000/2 = 2000.
+iters: 2000
+learning_rate: 2.0e-4
+
+mask_prompt: true           # loss on the SQL only, not on re-reading the schema
+
+steps_per_report: 25
+steps_per_eval: 250
+val_batches: 20
+save_every: 250
+adapter_path: "outputs/qwen3-4b-text2sql-mlx"
+
+seed: 42
+
+lora_parameters:
+  keys:
+    - "self_attn.q_proj"
+    - "self_attn.k_proj"
+    - "self_attn.v_proj"
+    - "self_attn.o_proj"
+    - "mlp.gate_proj"
+    - "mlp.up_proj"
+    - "mlp.down_proj"
+  rank: 32
+  scale: 1.0                # scale == alpha/r, so 1.0 matches PEFT's alpha == r
+  dropout: 0.0
+
+# The schedule advances once per OPTIMIZER UPDATE, not per iteration, so its
+# horizon is iters / grad_accumulation_steps = 2000 / 8 = 250.
+lr_schedule:
+  name: cosine_decay
+  warmup: 15
+  arguments: [2.0e-4, 250, 1.0e-5]
