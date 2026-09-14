@@ -20,6 +20,9 @@ import gradio as gr
 MODEL_ID = os.getenv("MODEL_ID", "unsloth/Qwen3-4B-Instruct-2507")
 GGUF_REPO = os.getenv("GGUF_REPO", f"{MODEL_ID}-gguf")
 GGUF_FILE = os.getenv("GGUF_FILE", "*q4_k_m.gguf")
+# A local .gguf path, which skips the Hub download entirely. Used when running
+# this server on your own machine instead of on a Space.
+GGUF_PATH = os.getenv("GGUF_PATH", "")
 USE_GGUF = os.getenv("USE_GGUF", "0") == "1"
 MAX_NEW_TOKENS = int(os.getenv("MAX_NEW_TOKENS", "320"))
 
@@ -89,14 +92,19 @@ except Exception:  # not a ZeroGPU Space
 if USE_GGUF:
     from llama_cpp import Llama
 
-    print(f"[init] llama.cpp CPU mode: {GGUF_REPO} :: {GGUF_FILE}")
-    _llm = Llama.from_pretrained(
-        repo_id=GGUF_REPO,
-        filename=GGUF_FILE,
-        n_ctx=4096,
-        n_threads=int(os.getenv("N_THREADS", "2")),
-        verbose=False,
-    )
+    _n_threads = int(os.getenv("N_THREADS", "2"))
+    if GGUF_PATH:
+        print(f"[init] llama.cpp from local file: {GGUF_PATH} ({_n_threads} threads)")
+        _llm = Llama(model_path=GGUF_PATH, n_ctx=4096, n_threads=_n_threads, verbose=False)
+    else:
+        print(f"[init] llama.cpp CPU mode: {GGUF_REPO} :: {GGUF_FILE} ({_n_threads} threads)")
+        _llm = Llama.from_pretrained(
+            repo_id=GGUF_REPO,
+            filename=GGUF_FILE,
+            n_ctx=4096,
+            n_threads=_n_threads,
+            verbose=False,
+        )
 
     def _complete_raw(user_content: str, max_new_tokens: int, temperature: float) -> str:
         out = _llm.create_chat_completion(

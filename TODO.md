@@ -44,9 +44,32 @@ published model.
 - [x] q8_0 GGUF for CPU inference (6.7s/query at 2 threads, measured)
 - [x] 18-case end-to-end test harness with hand-verified reference queries
 
+## End-to-end test through the deployed frontend
+
+18 questions across three schemas, sent to the same `/api/generate` the browser
+uses, each compared against a hand-written reference query.
+
+| | result |
+|---|---|
+| executed without error | **18/18** |
+| matched the reference exactly | **16/18 (89%)** |
+| needed a repair pass | 0 |
+| latency | 1.0-3.0s |
+
+By type: basic 7/7, join 4/4, filter 1/1, multi-join 1/1, aggregation 3/4,
+subquery 0/1.
+
+Both misses are the metric, not the model. Asked which product sold the most
+units it answered `('Widget', 416)` where the reference is `('Widget',)`, and
+for departments above the average cost it answered `('cardiology', 470.25)`
+against `('cardiology',)`. The answers are right; strict result-set comparison
+penalises the extra column. By content the model scored 18/18.
+
 ## Open
 
-- [ ] Run the 18-case suite against the live Vercel URL once the Space finishes building
+- [ ] Restore a permanent backend. The demo currently runs through a Cloudflare
+      quick tunnel to a local llama.cpp server, so it only works while that
+      machine is awake, and the URL changes on restart.
 - [ ] Kaggle 20k two-dataset run — needs Accelerator set to **GPU T4 x2** in the
       notebook UI. Kaggle defaults to P100, which modern PyTorch has no kernels
       for, and the GPU type cannot be set through the API.

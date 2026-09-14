@@ -1,0 +1,207 @@
+{
+  "base_url": "https://text2sql-qwen3.vercel.app",
+  "n": 18,
+  "executed": 18,
+  "correct": 16,
+  "repaired": 0,
+  "results": [
+    {
+      "question": "Total revenue per region in Q3",
+      "kind": "aggregation",
+      "sql": "SELECT region, SUM(revenue) FROM sales WHERE quarter = 'Q3' GROUP BY region",
+      "reference": "SELECT region, SUM(revenue) FROM sales WHERE quarter='Q3' GROUP BY region",
+      "executed": true,
+      "correct": true,
+      "repaired": false,
+      "seconds": 3.0,
+      "detail": ""
+    },
+    {
+      "question": "Which product sold the most units overall?",
+      "kind": "aggregation",
+      "sql": "SELECT product, SUM(units) FROM sales GROUP BY product ORDER BY SUM(units) DESC LIMIT 1",
+      "reference": "SELECT product FROM sales GROUP BY product ORDER BY SUM(units) DESC LIMIT 1",
+      "executed": true,
+      "correct": false,
+      "repaired": false,
+      "seconds": 1.6,
+      "detail": "got [('Widget', 416)] want [('Widget',)]"
+    },
+    {
+      "question": "How many sales rows are there?",
+      "kind": "basic",
+      "sql": "SELECT COUNT(*) FROM sales",
+      "reference": "SELECT COUNT(*) FROM sales",
+      "executed": true,
+      "correct": true,
+      "repaired": false,
+      "seconds": 1.5,
+      "detail": ""
+    },
+    {
+      "question": "List the distinct regions",
+      "kind": "basic",
+      "sql": "SELECT DISTINCT region FROM sales",
+      "reference": "SELECT DISTINCT region FROM sales",
+      "executed": true,
+      "correct": true,
+      "repaired": false,
+      "seconds": 1.1,
+      "detail": ""
+    },
+    {
+      "question": "What is the total revenue across all rows?",
+      "kind": "basic",
+      "sql": "SELECT SUM(revenue) FROM sales",
+      "reference": "SELECT SUM(revenue) FROM sales",
+      "executed": true,
+      "correct": true,
+      "repaired": false,
+      "seconds": 1.3,
+      "detail": ""
+    },
+    {
+      "question": "Show every sale with revenue above 40000, highest first",
+      "kind": "filter",
+      "sql": "SELECT * FROM sales WHERE revenue > 40000 ORDER BY revenue DESC",
+      "reference": "SELECT * FROM sales WHERE revenue>40000 ORDER BY revenue DESC",
+      "executed": true,
+      "correct": true,
+      "repaired": false,
+      "seconds": 1.3,
+      "detail": ""
+    },
+    {
+      "question": "Average units sold per product",
+      "kind": "aggregation",
+      "sql": "SELECT product, AVG(units) FROM sales GROUP BY product",
+      "reference": "SELECT product, AVG(units) FROM sales GROUP BY product",
+      "executed": true,
+      "correct": true,
+      "repaired": false,
+      "seconds": 1.4,
+      "detail": ""
+    },
+    {
+      "question": "How many books did each author write? Show the author name.",
+      "kind": "join",
+      "sql": "SELECT a.name, COUNT(b.author_id) FROM authors a JOIN books b ON a.author_id = b.author_id GROUP BY a.name",
+      "reference": "SELECT a.name, COUNT(b.book_id) FROM authors a JOIN books b ON a.author_id=b.author_id GROUP BY a.name",
+      "executed": true,
+      "correct": true,
+      "repaired": false,
+      "seconds": 2.4,
+      "detail": ""
+    },
+    {
+      "question": "Which books are currently on loan? Show the title.",
+      "kind": "join",
+      "sql": "SELECT b.title FROM books b JOIN loans l ON b.book_id = l.book_id WHERE l.returned = 0",
+      "reference": "SELECT DISTINCT b.title FROM books b JOIN loans l ON b.book_id=l.book_id WHERE l.returned=0",
+      "executed": true,
+      "correct": true,
+      "repaired": false,
+      "seconds": 1.4,
+      "detail": ""
+    },
+    {
+      "question": "Count loans per author country",
+      "kind": "multi-join",
+      "sql": "SELECT a.country, COUNT(l.loan_id) FROM authors a JOIN books b ON a.author_id = b.author_id JOIN loans l ON b.book_id = l.book_id GROUP BY a.country",
+      "reference": "SELECT a.country, COUNT(*) FROM loans l JOIN books b ON l.book_id=b.book_id JOIN authors a ON b.author_id=a.author_id GROUP BY a.country",
+      "executed": true,
+      "correct": true,
+      "repaired": false,
+      "seconds": 1.9,
+      "detail": ""
+    },
+    {
+      "question": "List book titles published before 1975",
+      "kind": "basic",
+      "sql": "SELECT title FROM books WHERE year < 1975",
+      "reference": "SELECT title FROM books WHERE year<1975",
+      "executed": true,
+      "correct": true,
+      "repaired": false,
+      "seconds": 1.1,
+      "detail": ""
+    },
+    {
+      "question": "Which authors are from the USA?",
+      "kind": "basic",
+      "sql": "SELECT name FROM authors WHERE country = 'USA'",
+      "reference": "SELECT name FROM authors WHERE country='USA'",
+      "executed": true,
+      "correct": true,
+      "repaired": false,
+      "seconds": 1.2,
+      "detail": ""
+    },
+    {
+      "question": "Average visit cost by department, highest first",
+      "kind": "aggregation",
+      "sql": "SELECT department, AVG(cost) as avg_cost FROM visits GROUP BY department ORDER BY avg_cost DESC",
+      "reference": "SELECT department, AVG(cost) AS a FROM visits GROUP BY department ORDER BY a DESC",
+      "executed": true,
+      "correct": true,
+      "repaired": false,
+      "seconds": 2.1,
+      "detail": ""
+    },
+    {
+      "question": "Which patients have more than one visit? Show their names.",
+      "kind": "join",
+      "sql": "SELECT name FROM patients WHERE patient_id IN (SELECT patient_id FROM visits GROUP BY patient_id HAVING COUNT(*) > 1)",
+      "reference": "SELECT p.name FROM patients p JOIN visits v ON p.patient_id=v.patient_id GROUP BY p.name HAVING COUNT(*)>1",
+      "executed": true,
+      "correct": true,
+      "repaired": false,
+      "seconds": 1.7,
+      "detail": ""
+    },
+    {
+      "question": "Total spend per city",
+      "kind": "join",
+      "sql": "SELECT city, SUM(cost) FROM visits JOIN patients ON visits.patient_id = patients.patient_id GROUP BY city",
+      "reference": "SELECT p.city, SUM(v.cost) FROM visits v JOIN patients p ON v.patient_id=p.patient_id GROUP BY p.city",
+      "executed": true,
+      "correct": true,
+      "repaired": false,
+      "seconds": 1.3,
+      "detail": ""
+    },
+    {
+      "question": "How many visits were there in total?",
+      "kind": "basic",
+      "sql": "SELECT COUNT(*) FROM visits",
+      "reference": "SELECT COUNT(*) FROM visits",
+      "executed": true,
+      "correct": true,
+      "repaired": false,
+      "seconds": 1.0,
+      "detail": ""
+    },
+    {
+      "question": "Departments whose average visit cost is above the overall average",
+      "kind": "subquery",
+      "sql": "SELECT department, AVG(cost) as avg_cost FROM visits GROUP BY department HAVING avg_cost > (SELECT AVG(cost) FROM visits)",
+      "reference": "SELECT department FROM visits GROUP BY department HAVING AVG(cost) > (SELECT AVG(cost) FROM visits)",
+      "executed": true,
+      "correct": false,
+      "repaired": false,
+      "seconds": 1.5,
+      "detail": "got [('cardiology', 470.25)] want [('cardiology',)]"
+    },
+    {
+      "question": "List patients born before 1980",
+      "kind": "basic",
+      "sql": "SELECT name FROM patients WHERE birth_year < 1980",
+      "reference": "SELECT name FROM patients WHERE birth_year<1980",
+      "executed": true,
+      "correct": true,
+      "repaired": false,
+      "seconds": 1.2,
+      "detail": ""
+    }
+  ]
+}

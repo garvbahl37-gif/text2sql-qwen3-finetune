@@ -1,5 +1,11 @@
-# Free CPU-tier fallback. Rename this file over requirements.txt and set
-# USE_GGUF=1 in the Space's variables. Slower (~5-8 tok/s) but no GPU quota.
+# CPU inference through llama.cpp on a q8_0 GGUF.
+#
+# The extra index serves prebuilt CPU wheels. Without it pip compiles
+# llama-cpp-python from source, which takes 10-20 minutes on a Space builder
+# and can run out of memory. pip falls back to a source build if no wheel
+# matches, so this is strictly an improvement.
+--extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
+
 llama-cpp-python>=0.3.2
 huggingface_hub>=0.26.0
 gradio>=5.0.0
