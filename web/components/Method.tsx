@@ -2,7 +2,7 @@ import type { EvalReport } from "@/lib/types";
 
 const HARDWARE: Record<string, string> = {
   "mlx-apple-silicon":
-    "One Apple Silicon Mac, trained locally with MLX. Measured at 3.2 examples/sec on an M5 Pro (24GB unified memory), about 21 minutes for a full epoch. No rented GPU.",
+    "One Apple Silicon Mac, trained locally with MLX. 45 minutes of wall clock on an M5 Pro with 24GB of unified memory, for one epoch. No rented GPU, no cloud bill.",
   "cuda-unsloth":
     "One 48GB GPU (A40 / L40S / A6000) on RunPod, roughly 45 minutes of wall clock.",
 };
@@ -31,7 +31,7 @@ function spec(report: EvalReport): [string, React.ReactNode][] {
   ["Hardware", HARDWARE[report.backend ?? ""] ?? HARDWARE["cuda-unsloth"]],
   [
     "Serving",
-    "Adapter fused into the full-precision base — not a dequantised copy, so no 4-bit error is baked in — published to the Hugging Face Hub and served from a free Hugging Face Space. This page is a Next.js app on Vercel that proxies to it, so no token ever reaches the browser.",
+    "Adapter fused into the full-precision base — not a dequantised copy, so no 4-bit error is baked in — and published to the Hugging Face Hub. The same server runs either transformers on a GPU or llama.cpp on CPU from a quantised copy. This page is a Next.js app on Vercel that proxies to it, so no token ever reaches the browser.",
   ],
   [
     "Scoring",

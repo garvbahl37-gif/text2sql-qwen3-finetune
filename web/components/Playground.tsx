@@ -190,12 +190,25 @@ export default function Playground() {
 
         {status === "running" && slow && (
           <p className="notice">
-            Waking the model backend. A Space that has been idle takes about a minute to come back;
-            later requests return in a few seconds.
+            Waking the model backend. The first request after it has been idle can take about a
+            minute; later ones return in a few seconds.
           </p>
         )}
 
         {status === "error" && <p className="notice bad">{error}</p>}
+
+        {status === "done" && (meta?.lint_issues?.length ?? 0) > 0 && (
+          <div className="notice bad">
+            <strong>This query runs, but it probably answers a different question.</strong>
+            <ul style={{ margin: "8px 0 0", paddingLeft: 18 }}>
+              {meta!.lint_issues!.map((issue, i) => (
+                <li key={i} style={{ marginBottom: 4 }}>
+                  {issue}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         {status === "done" && meta?.repaired && (
           <details className="notice">

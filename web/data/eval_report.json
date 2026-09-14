@@ -2,7 +2,7 @@
   "base_model": "mlx-community/Qwen3-4B-Instruct-2507-4bit",
   "tuned_model": "outputs/qwen3-4b-text2sql-mlx",
   "backend": "mlx-apple-silicon",
-  "train_examples": 4001,
+  "train_examples": 4000,
   "dataset": "gretelai/synthetic_text_to_sql",
   "n_examples": 300,
   "decoding": "greedy",
@@ -13,41 +13,41 @@
       "exact_match": 0.3133
     },
     "tuned": {
-      "execution_accuracy": 0.8267,
-      "valid_sql_rate": 0.9733,
-      "exact_match": 0.37
+      "execution_accuracy": 0.84,
+      "valid_sql_rate": 0.9833,
+      "exact_match": 0.3967
     }
   },
   "deltas": {
-    "execution_accuracy": 0.0434,
-    "valid_sql_rate": -0.0034,
-    "exact_match": 0.0567
+    "execution_accuracy": 0.0567,
+    "valid_sql_rate": 0.0066,
+    "exact_match": 0.0834
   },
   "by_complexity": {
     "basic SQL": {
       "n": 165,
       "base": 0.8848,
-      "tuned": 0.897
+      "tuned": 0.903
     },
     "aggregation": {
       "n": 71,
       "base": 0.7042,
-      "tuned": 0.7746
+      "tuned": 0.8028
     },
     "single join": {
       "n": 38,
       "base": 0.6316,
-      "tuned": 0.7632
+      "tuned": 0.7895
     },
     "subqueries": {
       "n": 13,
       "base": 0.6923,
-      "tuned": 0.6923
+      "tuned": 0.6154
     },
     "window functions": {
       "n": 10,
       "base": 0.3,
-      "tuned": 0.5
+      "tuned": 0.6
     },
     "multiple_joins": {
       "n": 2,
@@ -61,10 +61,10 @@
     }
   },
   "counts": {
-    "tuned_win": 26,
-    "both_correct": 222,
-    "tuned_regression": 13,
-    "both_wrong": 39
+    "tuned_win": 29,
+    "both_correct": 223,
+    "tuned_regression": 12,
+    "both_wrong": 36
   },
   "samples": [
     {
@@ -79,6 +79,22 @@
       "base_exec_ok": false,
       "base_exact": false,
       "tuned_sql": "SELECT student_id FROM student_lifelong_learning WHERE course_id IS NULL",
+      "tuned_runs": true,
+      "tuned_exec_ok": true,
+      "tuned_exact": true
+    },
+    {
+      "id": 5085,
+      "domain": "oceans",
+      "complexity": "basic SQL",
+      "question": "What is the maximum water pressure at the deepest point in the Atlantic?",
+      "schema": "CREATE TABLE deep_sea_pressure (id INT, location VARCHAR(255), pressure INT, depth INT); INSERT INTO deep_sea_pressure (id, location, pressure, depth) VALUES (1, 'Challenger Deep', 1100, 10972), (2, 'Mariana Trench', 800, 10994);",
+      "gold_sql": "SELECT MAX(pressure) FROM deep_sea_pressure WHERE location = 'Challenger Deep'",
+      "base_sql": "SELECT MAX(pressure) \nFROM deep_sea_pressure \nWHERE location LIKE '%Atlantic%'",
+      "base_runs": true,
+      "base_exec_ok": false,
+      "base_exact": false,
+      "tuned_sql": "SELECT MAX(pressure) FROM deep_sea_pressure WHERE location = 'Challenger Deep'",
       "tuned_runs": true,
       "tuned_exec_ok": true,
       "tuned_exact": true
@@ -100,17 +116,17 @@
       "tuned_exact": true
     },
     {
-      "id": 2363,
-      "domain": "cosmetics",
-      "complexity": "basic SQL",
-      "question": "What are the top 3 cruelty-free certified cosmetic products by sales in Canada?",
-      "schema": "CREATE TABLE products (product_id INT, product_name VARCHAR(100), sales INT, certification VARCHAR(20)); INSERT INTO products VALUES (1, 'Mascara', 5000, 'cruelty-free'), (2, 'Lipstick', 7000, 'not_certified'), (3, 'Foundation', 6000, 'cruelty-free'); CREATE TABLE regions (region_id INT, region_name VARCHAR(50)); INSERT INTO regions VALUES (1, 'Canada'), (2, 'USA');",
-      "gold_sql": "SELECT product_name, sales FROM products WHERE certification = 'cruelty-free' ORDER BY sales DESC LIMIT 3",
-      "base_sql": "SELECT p.product_name\nFROM products p\nJOIN regions r ON p.product_id = 1\nWHERE p.certification = 'cruelty-free'\nORDER BY p.sales DESC\nLIMIT 3",
+      "id": 1565,
+      "domain": "mining industry",
+      "complexity": "single join",
+      "question": "List the labor productivity metrics for each mine, including the total amount of minerals extracted and the number of employees, and calculate the productivity metric for each mine.",
+      "schema": "CREATE TABLE labor_productivity (mine_id INT, amount_extracted INT, num_employees INT); INSERT INTO labor_productivity (mine_id, amount_extracted, num_employees) VALUES (1, 1000, 50), (1, 1200, 60), (2, 800, 40), (2, 900, 45); CREATE TABLE mines (mine_id INT, mine_name TEXT); INSERT INTO mines (mine_id, mine_name) VALUES (1, 'MineA'), (2, 'MineB');",
+      "gold_sql": "SELECT m.mine_name, AVG(lp.amount_extracted / lp.num_employees) AS productivity_metric FROM labor_productivity lp JOIN mines m ON lp.mine_id = m.mine_id GROUP BY m.mine_name",
+      "base_sql": "SELECT \n    lp.mine_id,\n    m.mine_name,\n    SUM(lp.amount_extracted) AS total_amount_extracted,\n    SUM(lp.num_employees) AS total_employees,\n    SUM(lp.amount_extracted) * 1.0 / SUM(lp.num_employees) AS productivity_metric\nFROM labor_productivity lp\nJOIN mines m ON lp.mine_id = m.mine_id\nGROUP BY lp.mine_id, m.mine_name",
       "base_runs": true,
       "base_exec_ok": false,
       "base_exact": false,
-      "tuned_sql": "SELECT product_name, sales FROM (SELECT product_name, sales, ROW_NUMBER() OVER (PARTITION BY certification ORDER BY sales DESC) as rn FROM products INNER JOIN regions ON 1=1 WHERE certification = 'cruelty-free' AND region_name = 'Canada') t WHERE rn <= 3",
+      "tuned_sql": "SELECT m.mine_name, AVG(l.amount_extracted / l.num_employees) as productivity_metric FROM labor_productivity l JOIN mines m ON l.mine_id = m.mine_id GROUP BY m.mine_name",
       "tuned_runs": true,
       "tuned_exec_ok": true,
       "tuned_exact": false
@@ -143,22 +159,6 @@
       "base_exec_ok": false,
       "base_exact": false,
       "tuned_sql": "SELECT s.name, COUNT(i.id) as total_incidents FROM sector s JOIN incidents i ON s.id = i.sector_id GROUP BY s.name ORDER BY total_incidents DESC",
-      "tuned_runs": true,
-      "tuned_exec_ok": true,
-      "tuned_exact": false
-    },
-    {
-      "id": 1511,
-      "domain": "entertainment industry",
-      "complexity": "subqueries",
-      "question": "Find TV shows with a higher IMDb rating than the average movie rating.",
-      "schema": "CREATE TABLE movie (id INT, title VARCHAR(50), rating DECIMAL(3,2)); CREATE TABLE tv_show (id INT, title VARCHAR(50), rating DECIMAL(3,2)); INSERT INTO movie (id, title, rating) VALUES (1, 'Movie1', 8.5), (2, 'Movie2', 6.7), (3, 'Movie3', 9.1); INSERT INTO tv_show (id, title, rating) VALUES (1, 'TVShow1', 8.8), (2, 'TVShow2', 7.2), (3, 'TVShow3', 9.0);",
-      "gold_sql": "SELECT title FROM tv_show WHERE rating > (SELECT AVG(rating) FROM movie)",
-      "base_sql": "SELECT ts.title\nFROM tv_show ts\nJOIN movie m ON ts.rating > m.rating\nWHERE ts.rating > (SELECT AVG(rating) FROM movie)",
-      "base_runs": true,
-      "base_exec_ok": false,
-      "base_exact": false,
-      "tuned_sql": "SELECT tv_show.title FROM tv_show WHERE tv_show.rating > (SELECT AVG(movie.rating) FROM movie)",
       "tuned_runs": true,
       "tuned_exec_ok": true,
       "tuned_exact": false
@@ -212,6 +212,22 @@
       "tuned_exact": false
     },
     {
+      "id": 422,
+      "domain": "water resources",
+      "complexity": "basic SQL",
+      "question": "Find the sensor with the maximum water level in the 'sensor_data' table",
+      "schema": "CREATE TABLE sensor_data (sensor_id INT, water_level FLOAT, timestamp TIMESTAMP);",
+      "gold_sql": "SELECT sensor_id, MAX(water_level) as max_water_level FROM sensor_data",
+      "base_sql": "SELECT sensor_id \nFROM sensor_data \nORDER BY water_level DESC \nLIMIT 1",
+      "base_runs": true,
+      "base_exec_ok": false,
+      "base_exact": false,
+      "tuned_sql": "SELECT sensor_id, MAX(water_level) FROM sensor_data",
+      "tuned_runs": true,
+      "tuned_exec_ok": true,
+      "tuned_exact": false
+    },
+    {
       "id": 5597,
       "domain": "oceans",
       "complexity": "basic SQL",
@@ -238,10 +254,10 @@
       "base_runs": true,
       "base_exec_ok": false,
       "base_exact": false,
-      "tuned_sql": "SELECT city, hours FROM (SELECT city, hours, ROW_NUMBER() OVER (ORDER BY hours DESC) as rank FROM CityVolunteers) as subquery WHERE rank <= 3",
+      "tuned_sql": "SELECT city, hours FROM CityVolunteers ORDER BY hours DESC LIMIT 3",
       "tuned_runs": true,
       "tuned_exec_ok": true,
-      "tuned_exact": false
+      "tuned_exact": true
     },
     {
       "id": 2893,
@@ -270,26 +286,10 @@
       "base_runs": true,
       "base_exec_ok": false,
       "base_exact": false,
-      "tuned_sql": "SELECT AVG(rainfall) FROM rainfall_asia WHERE year BETWEEN 2015 AND 2019",
+      "tuned_sql": "SELECT AVG(rainfall) FROM rainfall_asia WHERE country = 'AS' AND year BETWEEN 2015 AND 2019",
       "tuned_runs": true,
       "tuned_exec_ok": true,
-      "tuned_exact": false
-    },
-    {
-      "id": 2512,
-      "domain": "music industry",
-      "complexity": "aggregation",
-      "question": "What is the most popular genre among users?",
-      "schema": "CREATE TABLE users (id INT, name VARCHAR(50), favorite_genre VARCHAR(50)); INSERT INTO users (id, name, favorite_genre) VALUES (1, 'Alice', 'Pop'), (2, 'Bob', 'Rock'), (3, 'Charlie', 'Rock'), (4, 'David', 'Jazz'), (5, 'Eve', 'Pop');",
-      "gold_sql": "SELECT favorite_genre, COUNT(*) as genre_count FROM users GROUP BY favorite_genre ORDER BY genre_count DESC LIMIT 1",
-      "base_sql": "SELECT favorite_genre \nFROM users \nGROUP BY favorite_genre \nORDER BY COUNT(*) DESC \nLIMIT 1",
-      "base_runs": true,
-      "base_exec_ok": false,
-      "base_exact": false,
-      "tuned_sql": "SELECT favorite_genre, COUNT(*) as count FROM users GROUP BY favorite_genre ORDER BY count DESC LIMIT 1",
-      "tuned_runs": true,
-      "tuned_exec_ok": true,
-      "tuned_exact": false
+      "tuned_exact": true
     },
     {
       "id": 2282,
@@ -356,49 +356,49 @@
       "tuned_exact": false
     },
     {
-      "id": 3229,
-      "domain": "sports",
-      "complexity": "basic SQL",
-      "question": "What is the maximum number of wins by a team in a single English Premier League season, and which team was it?",
-      "schema": "CREATE TABLE seasons (season_id INT, team TEXT, wins INT);",
-      "gold_sql": "SELECT team, MAX(wins) FROM seasons",
-      "base_sql": "SELECT MAX(wins) AS max_wins, team \nFROM seasons \nWHERE team = 'English Premier League'",
+      "id": 4019,
+      "domain": "human resources",
+      "complexity": "aggregation",
+      "question": "List departments with more than one employee.",
+      "schema": "CREATE TABLE Employees (EmployeeID INT, FirstName VARCHAR(50), LastName VARCHAR(50), Department VARCHAR(50), ManagerID INT); INSERT INTO Employees (EmployeeID, FirstName, LastName, Department, ManagerID) VALUES (1, 'Jane', 'Smith', 'Marketing', 2), (2, 'Bruce', 'Johnson', 'IT', NULL), (3, 'Alice', 'Williams', 'Marketing', 1), (4, 'Charlie', 'Brown', 'HR', NULL), (5, 'Denise', 'Davis', 'Marketing', 1);",
+      "gold_sql": "SELECT Department FROM Employees GROUP BY Department HAVING COUNT(DISTINCT EmployeeID) > 1",
+      "base_sql": "SELECT Department \nFROM Employees \nGROUP BY Department \nHAVING COUNT(EmployeeID) > 1",
       "base_runs": true,
       "base_exec_ok": true,
       "base_exact": false,
-      "tuned_sql": "SELECT team, MAX(wins) FROM seasons WHERE team IN ('Manchester United', 'Arsenal', 'Liverpool', 'Chelsea', 'Tottenham Hotspur', 'Manchester City', 'West Ham United', 'Newcastle United', 'Brentford', 'Aston Villa', 'Crystal Palace', 'Southampton', 'Burnley', 'Leicester City', 'Watford', 'Portsmouth', 'Sunderland', 'Huddersfield Town', 'Cardiff City', 'Fulham', 'Bournemouth', 'Stoke City', 'Sheffield United', 'Brighton & Hove Albion', 'Everton', 'AFC Bournemouth', 'AFC Wimbledon', 'AFC Telford United', 'AFC Fylde', 'AFC Wimbledon', 'AFC Wimbledon', 'AFC Wimbledon', 'AFC Wimbledon', 'AFC Wimbledon', 'AFC Wimbledon', '",
-      "tuned_runs": false,
-      "tuned_exec_ok": false,
-      "tuned_exact": false
-    },
-    {
-      "id": 2125,
-      "domain": "hospitality technology",
-      "complexity": "basic SQL",
-      "question": "What is the market share of 'Online Travel Agency A' compared to 'Online Travel Agency B'?",
-      "schema": "CREATE TABLE bookings (booking_id INT, hotel_id INT, agency TEXT, revenue FLOAT);",
-      "gold_sql": "SELECT (SUM(CASE WHEN agency = 'Online Travel Agency A' THEN revenue ELSE 0 END) / SUM(CASE WHEN agency IN ('Online Travel Agency A', 'Online Travel Agency B') THEN revenue ELSE 0 END)) * 100 as market_share_A, (SUM(CASE WHEN agency = 'Online Travel Agency B' THEN revenue ELSE 0 END) / SUM(CASE WHEN agency IN ('Online Travel Agency A', 'Online Travel Agency B') THEN revenue ELSE 0 END)) * 100 as market_share_B FROM bookings",
-      "base_sql": "SELECT \n  SUM(CASE WHEN agency = 'Online Travel Agency A' THEN revenue ELSE 0 END) * 100.0 / SUM(revenue) AS market_share_a,\n  SUM(CASE WHEN agency = 'Online Travel Agency B' THEN revenue ELSE 0 END) * 100.0 / SUM(revenue) AS market_share_b\nFROM bookings",
-      "base_runs": true,
-      "base_exec_ok": true,
-      "base_exact": false,
-      "tuned_sql": "SELECT agency, SUM(revenue) as total_revenue FROM bookings WHERE agency IN ('Online Travel Agency A', 'Online Travel Agency B') GROUP BY agency",
+      "tuned_sql": "SELECT Department, COUNT(*) FROM Employees GROUP BY Department HAVING COUNT(*) > 1",
       "tuned_runs": true,
       "tuned_exec_ok": false,
       "tuned_exact": false
     },
     {
-      "id": 4981,
-      "domain": "healthcare",
+      "id": 5626,
+      "domain": "rural development",
       "complexity": "aggregation",
-      "question": "Calculate the percentage of health equity metrics met by each community health worker in the West region for 2020 and 2021.",
-      "schema": "CREATE TABLE health_equity_metrics_worker (id INT, worker_id INT, region VARCHAR(50), year INT, metric1 BOOLEAN, metric2 BOOLEAN, metric3 BOOLEAN); INSERT INTO health_equity_metrics_worker (id, worker_id, region, year, metric1, metric2, metric3) VALUES (1, 1, 'West', 2020, true, true, false), (2, 2, 'West', 2020, true, false, true), (3, 3, 'West', 2020, false, true, true), (4, 1, 'West', 2021, true, true, true), (5, 2, 'West', 2021, true, true, false), (6, 3, 'West', 2021, true, false, true);",
-      "gold_sql": "SELECT worker_id, (SUM(CASE WHEN metric1 THEN 1 ELSE 0 END) + SUM(CASE WHEN metric2 THEN 1 ELSE 0 END) + SUM(CASE WHEN metric3 THEN 1 ELSE 0 END)) * 100.0 / 3 as percentage_met FROM health_equity_metrics_worker WHERE region = 'West' AND year IN (2020, 2021) GROUP BY worker_id",
-      "base_sql": "SELECT \n    worker_id,\n    (SUM(CASE WHEN metric1 THEN 1 ELSE 0 END) + \n     SUM(CASE WHEN metric2 THEN 1 ELSE 0 END) + \n     SUM(CASE WHEN metric3 THEN 1 ELSE 0 END)) * 100.0 / 3.0 AS percentage_met\nFROM health_equity_metrics_worker\nWHERE region = 'West' AND year IN (2020, 2021)\nGROUP BY worker_id",
+      "question": "List all the agricultural innovation projects in Central America that have received funding from both the World Bank and the Inter-American Development Bank.",
+      "schema": "CREATE TABLE AgriculturalInnovations (id INT, project_name TEXT, location TEXT, funder TEXT); INSERT INTO AgriculturalInnovations (id, project_name, location, funder) VALUES (1, 'AgriTech Central America', 'Central America', 'World Bank'); INSERT INTO AgriculturalInnovations (id, project_name, location, funder) VALUES (2, 'Smart Farm Central America', 'Central America', 'Inter-American Development Bank'); INSERT INTO AgriculturalInnovations (id, project_name, location, funder) VALUES (3, 'Farm Innovation Central America', 'Central America', 'Government of Central America');",
+      "gold_sql": "SELECT project_name, location FROM AgriculturalInnovations WHERE funder IN ('World Bank', 'Inter-American Development Bank') AND location = 'Central America' GROUP BY project_name HAVING COUNT(DISTINCT funder) = 2",
+      "base_sql": "SELECT * FROM AgriculturalInnovations WHERE location = 'Central America' AND funder = 'World Bank' INTERSECT SELECT * FROM AgriculturalInnovations WHERE location = 'Central America' AND funder = 'Inter-American Development Bank'",
       "base_runs": true,
       "base_exec_ok": true,
       "base_exact": false,
-      "tuned_sql": "SELECT worker_id, AVG(metric1) as pct_metric1, AVG(metric2) as pct_metric2, AVG(metric3) as pct_metric3 FROM health_equity_metrics_worker WHERE region = 'West' AND year IN (2020, 2021) GROUP BY worker_id",
+      "tuned_sql": "SELECT * FROM AgriculturalInnovations WHERE location = 'Central America' AND funder IN ('World Bank', 'Inter-American Development Bank')",
+      "tuned_runs": true,
+      "tuned_exec_ok": false,
+      "tuned_exact": false
+    },
+    {
+      "id": 5298,
+      "domain": "ethical fashion",
+      "complexity": "basic SQL",
+      "question": "How many fair-trade certified garment factories are in Asia?",
+      "schema": "CREATE TABLE garment_factories (id INT, certification VARCHAR(20), region VARCHAR(20)); INSERT INTO garment_factories (id, certification, region) VALUES (1, 'Fair Trade', 'China'), (2, 'GOTS', 'India'), (3, 'Fair Trade', 'Vietnam');",
+      "gold_sql": "SELECT COUNT(*) FROM garment_factories WHERE certification = 'Fair Trade' AND region = 'Asia'",
+      "base_sql": "SELECT COUNT(*) FROM garment_factories WHERE certification = 'Fair Trade' AND region = 'Asia'",
+      "base_runs": true,
+      "base_exec_ok": true,
+      "base_exact": true,
+      "tuned_sql": "SELECT COUNT(*) FROM garment_factories WHERE certification = 'Fair Trade' AND region IN ('China', 'India', 'Vietnam')",
       "tuned_runs": true,
       "tuned_exec_ok": false,
       "tuned_exact": false
@@ -420,22 +420,6 @@
       "tuned_exact": false
     },
     {
-      "id": 5085,
-      "domain": "oceans",
-      "complexity": "basic SQL",
-      "question": "What is the maximum water pressure at the deepest point in the Atlantic?",
-      "schema": "CREATE TABLE deep_sea_pressure (id INT, location VARCHAR(255), pressure INT, depth INT); INSERT INTO deep_sea_pressure (id, location, pressure, depth) VALUES (1, 'Challenger Deep', 1100, 10972), (2, 'Mariana Trench', 800, 10994);",
-      "gold_sql": "SELECT MAX(pressure) FROM deep_sea_pressure WHERE location = 'Challenger Deep'",
-      "base_sql": "SELECT MAX(pressure) \nFROM deep_sea_pressure \nWHERE location LIKE '%Atlantic%'",
-      "base_runs": true,
-      "base_exec_ok": false,
-      "base_exact": false,
-      "tuned_sql": "SELECT MAX(pressure) FROM deep_sea_pressure WHERE location = 'Atlantic'",
-      "tuned_runs": true,
-      "tuned_exec_ok": false,
-      "tuned_exact": false
-    },
-    {
       "id": 4432,
       "domain": "food services",
       "complexity": "basic SQL",
@@ -446,7 +430,23 @@
       "base_runs": true,
       "base_exec_ok": false,
       "base_exact": false,
-      "tuned_sql": "SELECT ingredient, quantity FROM inventory WHERE ingredient IN ('Chicken', 'Beef', 'Potatoes', 'Salt', 'Pepper')",
+      "tuned_sql": "SELECT ingredient, quantity FROM inventory WHERE ingredient IN ('Chicken', 'Beef', 'Salt')",
+      "tuned_runs": true,
+      "tuned_exec_ok": false,
+      "tuned_exact": false
+    },
+    {
+      "id": 1786,
+      "domain": "space",
+      "complexity": "basic SQL",
+      "question": "What is the average number of moons for planets in our solar system?",
+      "schema": "CREATE TABLE SolarSystem (Planet VARCHAR(50), Moons INT); INSERT INTO SolarSystem (Planet, Moons) VALUES ('Mercury', 0), ('Venus', 0), ('Earth', 1), ('Mars', 2), ('Jupiter', 79), ('Saturn', 82), ('Uranus', 27), ('Neptune', 14);",
+      "gold_sql": "SELECT AVG(Moons) FROM SolarSystem WHERE Moons > 0",
+      "base_sql": "SELECT AVG(Moons) FROM SolarSystem",
+      "base_runs": true,
+      "base_exec_ok": false,
+      "base_exact": false,
+      "tuned_sql": "SELECT AVG(Moons) FROM SolarSystem",
       "tuned_runs": true,
       "tuned_exec_ok": false,
       "tuned_exact": false

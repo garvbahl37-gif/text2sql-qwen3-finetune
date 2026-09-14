@@ -68,6 +68,79 @@ REPAIR_HINTS = (
 )
 
 
+# ---------------------------------------------------------------------------
+# Structural lint
+#
+# The repair pass above only fires on a SQLite error. These patterns produce
+# SQL that runs fine and answers the wrong question, which is worse, because
+# nothing downstream notices. Each rule below was written against a real
+# failure, and each is narrow enough to rarely fire on a correct query.
+# ---------------------------------------------------------------------------
+TOP_N = re.compile(r"\b(?:top|highest|best|largest|bottom|lowest)\s+(\d+|two|three|five|ten)\b", re.I)
+RANK_FN = re.compile(r"\b(?:RANK|DENSE_RANK|ROW_NUMBER)\s*\(\s*\)\s*OVER", re.I)
+RANK_FILTERED = re.compile(r"\bWHERE\b[^;]*\b(?:rnk|rank|rn|row_num|position)\b|\bQUALIFY\b|\bLIMIT\b", re.I)
+WINDOW_FN = re.compile(r"\bOVER\s*\(", re.I)
+GROUP_BY = re.compile(r"\bGROUP\s+BY\b", re.I)
+WITH_CTE = re.compile(r"^\s*WITH\b", re.I)
+SHARE_WORDS = re.compile(r"\b(percentage|percent|share|proportion|fraction|ratio of)\b", re.I)
+RESTRICT_WORDS = re.compile(r"\b(exclude|excluding|only|completed|cancelled|canceled|active|pending|shipped|delivered|returned)\b", re.I)
+HAS_WHERE = re.compile(r"\bWHERE\b", re.I)
+
+
+# Telling this model what to do rarely works after narrow fine-tuning; showing
+# it the shape to copy works better. This skeleton is the standard two-stage
+# pattern for per-group shares and top-N, which is what the lint rules detect.
+CTE_SKELETON = """
+Use this exact shape, substituting the real tables, columns and filters:
+
+WITH agg AS (
+  SELECT <group_cols>, SUM(<measure>) AS metric, COUNT(DISTINCT <id>) AS uniques
+  FROM <tables with joins>
+  WHERE <row filters from the question>
+  GROUP BY <group_cols>
+),
+ranked AS (
+  SELECT *,
+         metric * 100.0 / SUM(metric) OVER (PARTITION BY <outer_group>) AS pct,
+         RANK() OVER (PARTITION BY <outer_group> ORDER BY metric DESC) AS rnk
+  FROM agg
+)
+SELECT * FROM ranked WHERE rnk <= <n> ORDER BY <outer_group>, rnk;
+"""
+
+
+def lint_sql(question: str, sql: str) -> list[str]:
+    """Structural problems in SQL that runs but answers the wrong question."""
+    issues = []
+
+    if TOP_N.search(question) and RANK_FN.search(sql) and not RANK_FILTERED.search(sql):
+        issues.append(
+            "The question asks for a top-N within each group, and the query computes a "
+            "rank but never filters on it, so every row is returned. Put the ranked "
+            "query in a CTE and filter the rank in an outer SELECT."
+        )
+
+    # Share-of-group-total needs the window applied to an already-aggregated CTE.
+    # Windowing in the same SELECT as the GROUP BY aggregates windows over the
+    # pre-aggregation rows, which is how percentages above 100 appear.
+    if (SHARE_WORDS.search(question) and WINDOW_FN.search(sql)
+            and GROUP_BY.search(sql) and not WITH_CTE.search(sql)):
+        issues.append(
+            "A share of a group total cannot be computed with a window function in the "
+            "same SELECT as the GROUP BY aggregates -- it windows over the rows before "
+            "grouping and can exceed 100%. Aggregate in a CTE first, then apply the "
+            "window function to that CTE in an outer SELECT."
+        )
+
+    if RESTRICT_WORDS.search(question) and not HAS_WHERE.search(sql):
+        issues.append(
+            "The question restricts which rows should count, but the query has no WHERE "
+            "clause, so every row is included."
+        )
+
+    return issues
+
+
 def repair_hint(error: str) -> str:
     low = (error or "").lower()
     for needle, hint in REPAIR_HINTS:
@@ -265,6 +338,28 @@ def generate(schema: str, question: str, max_new_tokens: int = MAX_NEW_TOKENS,
                 break
             repair_error = err2
 
+    # A query that runs can still answer the wrong question. Lint it, and if it
+    # trips a known-bad pattern, ask the model to rewrite with that specific
+    # guidance -- keeping the original unless the rewrite runs and lints clean.
+    lint_issues = lint_sql(question, sql) if (repair and err is None) else []
+    if lint_issues:
+        needs_cte = any("CTE" in i for i in lint_issues)
+        prompt = REPAIR_TEMPLATE.format(
+            schema=schema, question=question, sql=sql,
+            error="The query runs, but: " + " ".join(lint_issues),
+            hint=CTE_SKELETON if needs_cte else "")
+        for temp in (0.5, 0.9):
+            raw3 = _complete_raw(prompt, int(max_new_tokens), temp)
+            sql3 = extract_sql(raw3)
+            if not sql3 or sql3 == sql:
+                continue
+            cols3, rows3, err3 = execute(schema, sql3)
+            if err3 is None and not lint_sql(question, sql3):
+                first_sql, first_error = sql, "structural: " + " ".join(lint_issues)
+                sql, cols, rows, repaired = sql3, cols3, rows3, True
+                lint_issues = []
+                break
+
     gen_ms = int((time.time() - t0) * 1000)
 
     if err:
@@ -289,6 +384,7 @@ def generate(schema: str, question: str, max_new_tokens: int = MAX_NEW_TOKENS,
         # "never attempted" are different bugs and must not look identical.
         "repair_sql": repair_sql,
         "repair_error": repair_error,
+        "lint_issues": lint_issues,
         "first_attempt_sql": first_sql if repair_attempted else None,
         "first_attempt_error": first_error if repair_attempted else None,
         "columns": cols,

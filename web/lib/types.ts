@@ -49,6 +49,7 @@ export type GenerateResponse = {
     rows?: (string | number | boolean | null)[][];
     row_count?: number;
     repaired?: boolean;
+    lint_issues?: string[];
     first_attempt_sql?: string | null;
     first_attempt_error?: string | null;
   };

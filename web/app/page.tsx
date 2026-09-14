@@ -83,7 +83,7 @@ export default function Page() {
       {tab === "method" && <Method report={evalReport} />}
 
       <footer className="foot">
-        Fine-tuned with Unsloth on RunPod. Served from a Hugging Face Space, deployed on Vercel.
+        Fine-tuned with MLX on an Apple M5 Pro. Frontend on Vercel.
       </footer>
     </main>
   );

@@ -11,6 +11,8 @@ web demo.
 | Model | https://huggingface.co/bharatverse11/qwen3-4b-text2sql |
 | GGUF (CPU) | https://huggingface.co/bharatverse11/qwen3-4b-text2sql-gguf |
 
+![The demo generating and running a three-table join](docs/demo.png)
+
 ## Result
 
 Held-out set of 300 examples the model never saw, greedy decoding, scored by
@@ -52,6 +54,8 @@ correct query written differently still counts here. Beyond that:
   correctness would inflate the result.
 - Scoring lives in one module shared by both training backends, so a CUDA run
   and an Apple Silicon run cannot report subtly different numbers.
+
+![Benchmark tab showing base versus fine-tuned](docs/benchmark.png)
 
 ## End-to-end test
 
@@ -95,14 +99,59 @@ to imply one when the runs are not actually comparable.
 
 ## Known weaknesses
 
-- For hard analytical questions the model writes elaborate window-function
-  queries and sometimes trips a SQLite rule, such as using a window function in
-  `HAVING`. The serving layer retries once with the database's own error fed
-  back, which fixes many of these. That mitigates a symptom; it does not fix the
-  model.
+**The model breaks when a question needs more than one level of aggregation.**
+That is the sharpest boundary found so far, and it is worth stating precisely.
+
+Given a three-table e-commerce schema and the question *"for each country, find
+the top 2 product categories by completed-order revenue, with each category's
+revenue, unique customers, percentage of country revenue, and rank"*, it
+produces SQL that **runs without error and is wrong three ways**:
+
+```sql
+SELECT c.country, p.category,
+       SUM(o.quantity * p.price) AS revenue,
+       SUM(o.quantity * p.price) OVER (PARTITION BY c.country) AS country_revenue,
+       SUM(...) OVER (PARTITION BY c.country) / SUM(...) OVER (PARTITION BY c.country) AS percentage,
+       RANK() OVER (PARTITION BY c.country ORDER BY SUM(...) DESC) AS rank_within_country
+FROM ... GROUP BY c.country, p.category
+```
+
+1. `country_revenue` windows over the rows *before* grouping, giving India 1900
+   where the real total is 2900.
+2. The percentage divides a value by itself, so every row reads 1.
+3. It computes a rank and never filters on it, so "top 2" returns everything.
+
+The correct shape is two-stage: aggregate in a CTE, then window over the
+aggregate. Earlier versions of the same query class fail louder, with
+`misuse of window function SUM()`, because SQLite rejects an aggregate wrapped
+around a window function.
+
+Three repair strategies were tried and all failed: feeding the problem back,
+sampling at two temperatures, and supplying a literal CTE skeleton to copy. The
+model returned the identical query every time. Narrow supervised fine-tuning
+made it strong at one-shot schema-to-SQL and largely deaf to corrective
+instructions.
+
+So the serving layer **detects rather than repairs** this class.
+`lint_sql()` in `serving/app.py` flags queries that run but answer a different
+question — a rank computed and never filtered, a share windowed over
+pre-aggregation rows, a stated row restriction with no `WHERE` — and the
+frontend shows the warning instead of presenting wrong numbers as fact. The
+rules were checked against correct queries (the proper CTE form, plain joins,
+`LIMIT`-based top-N) and fire on none of them.
+
+`training/gen_multilevel.py` synthesises training data for exactly this shape:
+1,400 verified examples across six domains covering shares, ranks, top-N per
+group and above-group-average. Every gold query executes, every set of
+percentages sums to 100 within its group, every rank starts at 1, and none trip
+the linter.
+
+Smaller issues:
+
+- Queries that fail outright are retried once with the database's own error fed
+  back, which fixes many of them. That mitigates a symptom, not the model.
 - Greedy decoding reproduces the same wrong query however the repair prompt is
-  worded — narrow supervised fine-tuning cost the model some
-  instruction-following — so repairs sample instead.
+  worded, so repairs sample instead.
 - The model sometimes answers only part of a multi-clause question.
 
 ## Layout
