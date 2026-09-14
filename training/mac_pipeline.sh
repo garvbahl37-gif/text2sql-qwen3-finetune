@@ -65,7 +65,9 @@ else
 fi
 
 log "Evaluating base vs fine-tuned (execution accuracy)"
-$PY evaluate_mlx.py --adapter "$ADAPTER" --limit "$TEST_SIZE"
+# --skip-base reuses cached base-model predictions when the fingerprint shows
+# the model and test set are unchanged; it regenerates otherwise.
+$PY evaluate_mlx.py --adapter "$ADAPTER" --limit "$TEST_SIZE" --skip-base
 
 log "Fusing into full-precision weights and publishing"
 # Fuse into the FULL-PRECISION base, not the 4-bit one the adapter trained

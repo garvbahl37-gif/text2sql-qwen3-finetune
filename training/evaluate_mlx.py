@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import gc
+import hashlib
 import json
 import time
 from pathlib import Path
@@ -87,13 +88,34 @@ def main() -> None:
     train_examples = sum(1 for _ in train_file.open()) if train_file.exists() else None
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
+    # Base predictions are deterministic (greedy) for a given model and test
+    # set, so they can be reused across runs -- but ONLY if both are unchanged.
+    # The fingerprint makes a stale cache impossible to use by accident.
+    fingerprint = {
+        "base_model": args.base,
+        "test_sha256": hashlib.sha256(args.test.read_bytes()).hexdigest(),
+        "n": len(examples),
+        "max_tokens": args.max_tokens,
+    }
     base_cache = args.out.parent / "base_preds.json"
-    if args.skip_base and base_cache.exists():
+    meta_cache = args.out.parent / "base_preds.meta.json"
+
+    reusable = False
+    if args.skip_base and base_cache.exists() and meta_cache.exists():
+        cached = json.loads(meta_cache.read_text())
+        if cached == fingerprint:
+            reusable = True
+        else:
+            changed = [k for k in fingerprint if cached.get(k) != fingerprint[k]]
+            print(f"Cached base predictions are stale ({', '.join(changed)} changed) - regenerating")
+
+    if reusable:
         base_raw = json.loads(base_cache.read_text())
-        print(f"Reusing cached base predictions ({len(base_raw)})")
+        print(f"Reusing cached base predictions ({len(base_raw)}) - identical model and test set")
     else:
         base_raw = generate_all("BASE", args.base, None, conversations, args.batch_size, args.max_tokens)
         base_cache.write_text(json.dumps(base_raw))
+        meta_cache.write_text(json.dumps(fingerprint, indent=2))
 
     tuned_raw = generate_all(
         "FINE-TUNED", args.base, str(args.adapter), conversations, args.batch_size, args.max_tokens
