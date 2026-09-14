@@ -66,12 +66,29 @@ export default function Playground() {
     slowTimer.current = setTimeout(() => setSlow(true), 8000);
 
     try {
-      const res = await fetch("/api/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ schema, question }),
-      });
-      const body = await res.json();
+      let res: Response;
+      try {
+        res = await fetch("/api/generate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ schema, question }),
+        });
+      } catch {
+        // fetch() only rejects on a network-level failure, which here means the
+        // page reached no server at all. "Failed to fetch" is what the browser
+        // says, and it tells the reader nothing useful.
+        throw new Error(
+          "Could not reach the app server. If you are running locally, check that " +
+            "`npm run dev` is still running in your terminal.",
+        );
+      }
+
+      let body: { error?: string } & Partial<GenerateResponse>;
+      try {
+        body = await res.json();
+      } catch {
+        throw new Error(`The server returned a ${res.status} with no readable body.`);
+      }
       if (!res.ok) throw new Error(body?.error ?? `Request failed (${res.status}).`);
       setResult(body as GenerateResponse);
       setStatus("done");
