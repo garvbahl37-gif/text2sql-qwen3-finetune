@@ -78,24 +78,89 @@ By content it scored 18 of 18.
 All 18 reference queries were themselves verified to execute and return rows, so
 a failure implicates the model and not the test.
 
-## What did not work
+## Four runs, and what each one settled
 
-Kept here because a portfolio of only successes is not evidence of much.
+Every run is scored on the same 300 held-out examples, so the numbers below are
+directly comparable. Significance is McNemar's exact test on the paired results.
 
-**Rebalancing the training mix by measured headroom.** More than half of run 1's
-training data was "basic SQL" where the base model already scored 88.5%, while
-window functions — 70 points of headroom — got 3%. Run 2 rebalanced toward the
-hard classes, same size, same held-out set.
+| run | training data | execution accuracy | verdict |
+|---|---|---|---|
+| base | — | 78.3% | |
+| **1** | 4,000, natural mix | **84.0%** | **published** |
+| 2 | 4,000, headroom-balanced | 82.7% | p = 0.454, indistinguishable |
+| 3 | 5,400, + synthetic multi-level | 82.7% | p = 0.557, indistinguishable |
+| 4 | 16,000, three sources, T4 | 82.7% | p = 0.454, indistinguishable |
 
-| | run 1, natural mix | run 2, balanced |
+**Nothing beat run 1.** Four attempts, three of them substantial changes in data
+size, mix and source, and every one landed inside the noise band. That is the
+honest headline, and it is worth more than a fifth attempt dressed up as a win.
+
+### Run 2 — rebalancing the mix by headroom
+
+More than half of run 1's data was "basic SQL" where the base already scored
+88.5%, while window functions, with 70 points of headroom, got 3%. Rebalancing
+toward the hard classes did not help.
+
+### Run 3 — synthetic multi-level data, and a contaminated benchmark
+
+Run 3 added 1,400 synthetic multi-level examples and scored **100%** on a
+held-out set drawn from the same generator. That number was wrong, not good: the
+generator emitted one query shape per kind with fixed column aliases, so the
+model memorised a template. On hand-written questions it scored **1 of 6**.
+
+100% exact-match is not a result real generalisation produces. The lesson is
+that a held-out split is not an independent benchmark when both sides come from
+the same generator.
+
+### Run 4 — diverse generator, honest benchmark, real hardware
+
+The generator was rebuilt to randomise aliases (5 fixed → 35), phrasings
+(4 → 113), schema shapes and SQL formulations, with no two examples sharing an
+identical gold query. Evaluation moved to 18 hand-written questions across four
+schemas that the generator never produced. Trained on Kaggle: 16,000 examples
+from three sources on a T4.
+
+| | run 1 | run 4 |
 |---|---|---|
-| execution accuracy | **84.0%** | 82.7% |
+| general SQL | 84.0% | 82.7% (p = 0.454) |
+| hand-written multi-level | 0 of 6 | **27.8%**, 0 regressions |
 
-It did not help. **McNemar's test on the 300 paired examples gives p = 0.454** —
-the runs disagree on 16 examples, ten one way and six the other, which is noise
-inside one standard error. The hypothesis is unsupported and run 1 remains the
-published model. `training/compare_runs.py` prints this comparison and refuses
-to imply one when the runs are not actually comparable.
+Run 4 genuinely learned something run 1 could not do at all, and 27.8% is what
+partial transfer actually looks like. It was still not published, for the reason
+in the next section.
+
+## Why run 4 was not published
+
+Run 4 is better at multi-level aggregation and statistically tied everywhere
+else, so publishing it would have been defensible. It was not published because
+the concrete query that motivated the work still fails:
+
+```sql
+WITH summed AS (
+  SELECT f.country AS grp, f.category AS b, ...
+  FROM orders f JOIN customers g ... JOIN products h ...
+```
+```
+no such column: f.country
+```
+
+The **structure is correct** — two-stage CTE, share computed over the aggregate,
+rank filtered in an outer select. What is wrong is **schema grounding**: it put
+`country` on `orders` when the schema puts it on `customers`. That accounts for
+5 of its 13 hand-written failures, and three repair attempts returned the
+identical query.
+
+The cause is in the generator, and it is measurable. Every three-table example
+it produces has the same layout: the fact table holds the quantity and the
+foreign keys, one dimension holds the group label, another holds the price. A
+model can infer where a column lives from that pattern without ever reading the
+schema. Real schemas scatter columns, so the skill never transferred.
+
+Fixing it means generating schemas where column placement is genuinely
+unpredictable — the measure sometimes on the dimension, the label sometimes on
+the fact table, distractor columns with the same name on several tables, group
+keys that need a two-hop join. That is a generator change and another run, and
+it is the single most promising next step.
 
 ## Known weaknesses
 

@@ -65,6 +65,29 @@ for departments above the average cost it answered `('cardiology', 470.25)`
 against `('cardiology',)`. The answers are right; strict result-set comparison
 penalises the extra column. By content the model scored 18/18.
 
+## Where this landed
+
+Four runs, all scored on the same 300 held-out examples. None beat run 1, and
+each difference tested as noise (McNemar p = 0.45-0.56). Run 1 stays published.
+
+Run 4 did learn multi-level aggregation that run 1 could not do at all
+(0 -> 27.8% on hand-written questions, 0 regressions) but was not published: the
+query that motivated the work still fails on schema grounding, putting `country`
+on `orders` when the schema puts it on `customers`.
+
+## Next step, with the reason
+
+The generator teaches query *structure* but not *schema grounding*, because
+every three-table example it emits has the same layout -- fact table holds the
+measure and foreign keys, dimensions hold the labels. A model can infer column
+placement from that pattern without reading the schema, which is exactly what
+run 4 does wrong.
+
+Generate schemas where placement is unpredictable: the measure sometimes on a
+dimension, the label sometimes on the fact table, distractor columns sharing a
+name across tables, group keys behind a two-hop join. Then re-run and score on
+the same hand-written holdout.
+
 ## Resume here
 
 Run 3 was stopped part-way at iteration 125 of 2700. A checkpoint exists at
