@@ -23,7 +23,12 @@ type SpacePayload = {
 };
 
 function headers() {
-  const h: Record<string, string> = { "Content-Type": "application/json" };
+  const h: Record<string, string> = {
+    "Content-Type": "application/json",
+    // ngrok's free tier serves an HTML interstitial instead of proxying unless
+    // this header is present. Harmless on any other backend.
+    "ngrok-skip-browser-warning": "1",
+  };
   if (SPACE_TOKEN) h.Authorization = `Bearer ${SPACE_TOKEN}`;
   return h;
 }

@@ -46,30 +46,39 @@ SUB_VALUES = ["Electronics", "Accessories", "Apparel", "Home", "Sports", "Books"
 
 
 def build_schema(d, rng) -> tuple[str, list]:
+    """Compact schema.
+
+    The first version wrote multi-line CREATE statements and up to 48 fact rows,
+    which pushed the median example to 797 tokens. At a 640-token training cap
+    that truncated 96% of them mid-query, teaching the model to emit unfinished
+    CTEs. Everything here is sized so a whole example fits comfortably.
+    """
     _, fact, dim, gcol, scol, measure, qty, status, good, bad = d
-    groups = rng.sample(GROUP_VALUES, rng.randint(3, 4))
-    subs = rng.sample(SUB_VALUES, rng.randint(3, 4))
+    groups = rng.sample(GROUP_VALUES, 3)
+    subs = rng.sample(SUB_VALUES, 3)
 
     lines = [
-        f"CREATE TABLE {dim} (\n  {dim[:-1]}_id INTEGER PRIMARY KEY,\n  name TEXT,\n  {gcol} TEXT\n);",
-        f"CREATE TABLE items (\n  item_id INTEGER PRIMARY KEY,\n  item_name TEXT,\n  {scol} TEXT,\n  {measure} REAL\n);",
-        f"CREATE TABLE {fact} (\n  {fact[:-1]}_id INTEGER PRIMARY KEY,\n  {dim[:-1]}_id INTEGER,\n  item_id INTEGER,\n  {qty} INTEGER,\n  {status} TEXT\n);",
+        f"CREATE TABLE {dim} ({dim[:-1]}_id INTEGER PRIMARY KEY, name TEXT, {gcol} TEXT);",
+        f"CREATE TABLE items (item_id INTEGER PRIMARY KEY, item_name TEXT, {scol} TEXT, {measure} REAL);",
+        f"CREATE TABLE {fact} ({fact[:-1]}_id INTEGER PRIMARY KEY, {dim[:-1]}_id INTEGER, "
+        f"item_id INTEGER, {qty} INTEGER, {status} TEXT);",
     ]
     dim_rows, fact_rows, item_rows = [], [], []
     for i, g in enumerate(groups, 1):
-        dim_rows.append(f"({i}, '{chr(64+i)}cme', '{g}')")
+        dim_rows.append(f"({i},'{chr(64+i)}cme','{g}')")
     for j, sname in enumerate(subs, 1):
-        item_rows.append(f"({j}, 'item{j}', '{sname}', {rng.choice([50,75,100,250,500,800])})")
+        item_rows.append(f"({j},'item{j}','{sname}',{rng.choice([50,75,100,250,500,800])})")
     fid = 1
     for i in range(1, len(groups) + 1):
         for j in range(1, len(subs) + 1):
-            for _ in range(rng.randint(1, 3)):
+            # one fact row per pair, plus an occasional second so totals vary
+            for _ in range(1 + (1 if rng.random() < 0.35 else 0)):
                 st = good if rng.random() < 0.75 else bad
-                fact_rows.append(f"({fid}, {i}, {j}, {rng.randint(1,4)}, '{st}')")
+                fact_rows.append(f"({fid},{i},{j},{rng.randint(1,4)},'{st}')")
                 fid += 1
-    lines.append(f"INSERT INTO {dim} VALUES {', '.join(dim_rows)};")
-    lines.append(f"INSERT INTO items VALUES {', '.join(item_rows)};")
-    lines.append(f"INSERT INTO {fact} VALUES {', '.join(fact_rows)};")
+    lines.append(f"INSERT INTO {dim} VALUES {','.join(dim_rows)};")
+    lines.append(f"INSERT INTO items VALUES {','.join(item_rows)};")
+    lines.append(f"INSERT INTO {fact} VALUES {','.join(fact_rows)};")
     return "\n".join(lines), groups
 
 

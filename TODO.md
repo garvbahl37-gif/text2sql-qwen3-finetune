@@ -98,9 +98,11 @@ Notes for tomorrow:
   first and it should run closer to 0.74, so roughly an hour rather than two.
 - If run 3 does not beat run 1 on the general set, run 1 stays published. Run 2
   already demonstrated that a plausible data change can fail to help.
-- The demo currently points at the Hugging Face Space. A Cloudflare quick tunnel
-  gets a fresh random hostname on every start, so for a stable local backend use
-  Tailscale Funnel, an ngrok static domain, or a Cloudflare named tunnel.
+- The demo points at an ngrok reserved domain,
+  `bustled-hertha-unprojective.ngrok-free.dev`, which is stable across restarts,
+  so Vercel never needs updating again. Start the backend with
+  `bash serving/start_local.sh` and stop it with `serving/stop_local.sh`.
+  Do not run it during training: both compete for unified memory.
 
 ## Open
 
