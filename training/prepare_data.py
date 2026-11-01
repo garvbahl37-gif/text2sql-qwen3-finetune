@@ -21,6 +21,7 @@ from pathlib import Path
 
 from datasets import load_dataset
 
+from schema_enrich import enrich_schema
 from sources import SOURCES
 
 SYSTEM_PROMPT = (
@@ -52,12 +53,20 @@ CLASS_STATS = {
 MIN_SHARE = 0.03
 
 
+ENRICH = False
+SAMPLE_ROWS = 0
+
+
 def to_record(f: dict) -> dict:
+    # Schema linking is the dominant text-to-SQL failure mode, and enriching only
+    # at inference is a distribution shift for a model trained on bare DDL --
+    # measured at -0.7 points. The enrichment has to be present during training.
+    shown = enrich_schema(f["sql_context"], SAMPLE_ROWS) if ENRICH else f["sql_context"]
     return {
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": USER_TEMPLATE.format(
-                schema=f["sql_context"].strip(), question=f["sql_prompt"].strip())},
+                schema=shown.strip(), question=f["sql_prompt"].strip())},
             {"role": "assistant", "content": f["gold_sql"]},
         ],
         **{k: f[k] for k in ("sql_context", "sql_prompt", "gold_sql", "domain", "complexity", "source", "id")},
@@ -164,9 +173,18 @@ def main() -> None:
     ap.add_argument("--out", type=Path, default=Path("data"))
     ap.add_argument("--balance", action="store_true",
                     help="allocate by measured headroom instead of the natural mix")
+    ap.add_argument("--enrich", action="store_true",
+                    help="put a column index, join paths and ambiguous-name warnings into the "
+                         "schema the model is trained on")
+    ap.add_argument("--sample-rows", type=int, default=0)
     ap.add_argument("--keep-test", action="store_true",
                     help="leave an existing test.jsonl untouched, for comparability")
     args = ap.parse_args()
+
+    global ENRICH, SAMPLE_ROWS
+    ENRICH, SAMPLE_ROWS = args.enrich, args.sample_rows
+    if ENRICH:
+        print(f"Schema enrichment ON for training data (sample_rows={SAMPLE_ROWS})")
 
     names = [s.strip() for s in args.sources.split(",") if s.strip()]
     unknown = [n for n in names if n not in SOURCES]

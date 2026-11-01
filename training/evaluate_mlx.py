@@ -20,6 +20,7 @@ from mlx_lm import batch_generate, load
 from mlx_lm.sample_utils import make_sampler
 
 from evalcore import build_report, print_table
+from schema_enrich import enrich_schema
 from sqlutil import gold_is_runnable
 
 DEFAULT_BASE = "mlx-community/Qwen3-4B-Instruct-2507-4bit"
@@ -72,6 +73,12 @@ def main() -> None:
     ap.add_argument("--batch-size", type=int, default=8)
     ap.add_argument("--max-tokens", type=int, default=192)
     ap.add_argument("--skip-base", action="store_true", help="reuse cached base predictions")
+    ap.add_argument("--enrich", action="store_true",
+                    help="add a column index, join paths and ambiguous-name warnings to the "
+                         "schema in the prompt. Schema linking is the dominant text-to-SQL "
+                         "failure mode and this is what strong systems feed the model.")
+    ap.add_argument("--sample-rows", type=int, default=0,
+                    help="include N sample rows per table when enriching")
     args = ap.parse_args()
 
     examples = [json.loads(l) for l in args.test.read_text().splitlines() if l.strip()][: args.limit]
@@ -81,6 +88,13 @@ def main() -> None:
     print(f"Scoring {len(examples)} examples with executable gold SQL")
 
     conversations = [e["messages"][:-1] for e in examples]
+    if args.enrich:
+        # rewrite the schema inside the user turn, leaving the question untouched
+        for conv, ex in zip(conversations, examples):
+            u = conv[-1]
+            rich = enrich_schema(ex["sql_context"], sample_rows=args.sample_rows)
+            u["content"] = u["content"].replace(ex["sql_context"].strip(), rich, 1)
+        print(f"Schema enrichment ON (sample_rows={args.sample_rows})")
 
     # Record how much data the adapter actually saw, so the site can state it
     # rather than hardcoding a number that drifts when TRAIN_SIZE changes.

@@ -24,6 +24,8 @@ import random
 import sqlite3
 from pathlib import Path
 
+from schema_enrich import enrich_schema
+
 SYSTEM_PROMPT = (
     "You are a precise text-to-SQL engine. Given a SQLite schema and a question, "
     "reply with a single valid SQLite query that answers it. "
@@ -32,6 +34,9 @@ SYSTEM_PROMPT = (
 USER_TEMPLATE = "### Schema\n{schema}\n\n### Question\n{question}"
 
 # Each domain names its own tables and columns, so nothing is a fixed keyword.
+ENRICH = False
+SAMPLE_ROWS = 0
+
 DOMAINS = [
     dict(fact="orders", dim="customers", dim_key="customer_id", item="products", item_key="product_id",
          gcol="country", scol="category", price="price", qty="quantity",
@@ -221,10 +226,11 @@ def make(d, rng) -> dict | None:
         if kind == "topn" and any(r[i] > n for r in rows):
             return None
 
+    shown = enrich_schema(schema, SAMPLE_ROWS) if ENRICH else schema
     return {
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": USER_TEMPLATE.format(schema=schema, question=q)},
+            {"role": "user", "content": USER_TEMPLATE.format(schema=shown, question=q)},
             {"role": "assistant", "content": sql},
         ],
         "sql_context": schema, "sql_prompt": q, "gold_sql": sql,
@@ -238,7 +244,12 @@ def main() -> None:
     ap.add_argument("--n", type=int, default=4000)
     ap.add_argument("--seed", type=int, default=7)
     ap.add_argument("--out", type=Path, default=Path("data/multilevel.jsonl"))
+    ap.add_argument("--enrich", action="store_true")
+    ap.add_argument("--sample-rows", type=int, default=0)
     args = ap.parse_args()
+
+    global ENRICH, SAMPLE_ROWS
+    ENRICH, SAMPLE_ROWS = args.enrich, args.sample_rows
 
     rng = random.Random(args.seed)
     out, attempts, kinds = [], 0, {}
