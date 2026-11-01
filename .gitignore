@@ -32,3 +32,6 @@ next-env.d.ts
 
 # playwright review artifacts
 .playwright-mcp/
+
+# separate repository, not part of this project
+FIneTuningMedicalDataset/
