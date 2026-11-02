@@ -65,6 +65,43 @@ for departments above the average cost it answered `('cardiology', 470.25)`
 against `('cardiology',)`. The answers are right; strict result-set comparison
 penalises the extra column. By content the model scored 18/18.
 
+## Run 5 in preparation: execution-guided DPO
+
+Current text-to-SQL work points at two levers, and four SFT runs landing inside
+noise says more data is not one of them.
+
+| approach | reported gain |
+|---|---|
+| execution-guided DPO after SFT (ExCoT-DPO) | BIRD 57.4 -> 68.5, Spider 78.8 -> 86.6 |
+| better schema linking (LinkAlign) | +6.7 Spider, +7.2 BIRD |
+
+**Schema enrichment, measured here.** A column index, join paths and
+ambiguous-name warnings derived from SQLite's catalog:
+
+| | bare DDL | enriched |
+|---|---|---|
+| base Qwen3-4B | 74.7% | **79.0%** |
+| run 4 (fine-tuned) | 82.7% | 82.0% |
+
+The base model gains 4.3 points; the fine-tuned one loses 0.7, because it was
+trained on bare DDL and enriching only at inference is a distribution shift.
+So enrichment belongs in training: `prepare_data.py --enrich` and
+`gen_multilevel.py --enrich`.
+
+An earlier claim that enrichment fixed the multi-level failure was wrong. It
+rested on one example with one phrasing; across all 18 hand-written questions it
+fixes 0 and breaks 0.
+
+**Preference data is built.** 549 pairs from 2,500 questions sampled at
+temperature 0.8 and graded by execution: 389 ran but returned the wrong rows,
+160 did not run, 94 are multi-level. No degenerate pairs.
+
+**Next, one variable at a time.** Four runs have already changed several things
+at once and landed in noise, so run 5 is DPO on run 4 with nothing else altered.
+MLX has no DPO, so it runs on Kaggle with TRL; `mlx_to_peft.py` recovers the
+run 4 adapter in PEFT format (round trip verified bit-identical). If DPO moves
+the number, enriched SFT comes after it, not alongside.
+
 ## Where this landed
 
 Four runs, all scored on the same 300 held-out examples. None beat run 1, and
